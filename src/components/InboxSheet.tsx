@@ -384,7 +384,11 @@ function InboxSheetMounted({
         </ScrollView>
       </Animated.View>
 
-      {/* FAB — pinned to the lower-right, floats over the sheet. */}
+      {/* FAB — pinned to the lower-right, floats over the sheet.
+          Pill shape with text ("New note") so it's discoverable; in dev
+          builds the Expo launcher floats a circular gear in the same
+          corner and was visually colliding with an icon-only round FAB.
+          The label moves the affordance to the LEFT of the gear. */}
       <SafeAreaView
         pointerEvents="box-none"
         style={{
@@ -399,7 +403,7 @@ function InboxSheetMounted({
           style={{
             alignItems: "flex-end",
             paddingRight: 24,
-            paddingBottom: 24,
+            paddingBottom: 32,
           }}
         >
           <Pressable
@@ -407,21 +411,33 @@ function InboxSheetMounted({
             accessibilityRole="button"
             accessibilityLabel="New note"
             style={({ pressed }) => ({
-              width: 56,
               height: 56,
-              borderRadius: 16,
+              paddingHorizontal: 22,
+              borderRadius: 28,
               backgroundColor: accent,
+              flexDirection: "row",
               alignItems: "center",
               justifyContent: "center",
               shadowColor: "#000",
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.18,
-              shadowRadius: 12,
-              elevation: 8,
-              transform: [{ scale: pressed ? 0.94 : 1 }],
+              shadowOffset: { width: 0, height: 6 },
+              shadowOpacity: 0.22,
+              shadowRadius: 14,
+              elevation: 10,
+              transform: [{ scale: pressed ? 0.96 : 1 }],
             })}
           >
-            <PlusIcon size={26} color={accentOn} weight="bold" />
+            <PlusIcon size={22} color={accentOn} weight="bold" />
+            <Text
+              style={{
+                marginLeft: 10,
+                color: accentOn,
+                fontFamily: "Inter-SemiBold",
+                fontSize: 15,
+                letterSpacing: -0.15,
+              }}
+            >
+              New note
+            </Text>
           </Pressable>
         </View>
       </SafeAreaView>

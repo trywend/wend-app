@@ -214,6 +214,22 @@ export default function HomeScreen() {
     return () => clearTimeout(t);
   }, [runs.length]);
 
+  // When the keyboard rises, the editor area shrinks (Android adjustResize)
+  // but the ScrollView doesn't auto-scroll the focused input into view. Fire
+  // a scrollToEnd on keyboardDidShow so the cursor / send button doesn't end
+  // up behind the keyboard. Two passes — one immediate, one after a frame
+  // for any layout reflow when a multiline input grows.
+  useEffect(() => {
+    const sub = Keyboard.addListener("keyboardDidShow", () => {
+      scrollRef.current?.scrollToEnd({ animated: false });
+      setTimeout(
+        () => scrollRef.current?.scrollToEnd({ animated: true }),
+        100,
+      );
+    });
+    return () => sub.remove();
+  }, []);
+
   /* ─── Blinking caret overlay (empty body, S1) ──────────────────────── */
   const blink = useRef(new RNAnimated.Value(1)).current;
   useEffect(() => {
@@ -448,7 +464,8 @@ export default function HomeScreen() {
       edges={["top", "bottom"]}
     >
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
         style={{ flex: 1 }}
       >
         {/* ─── Top app bar (S2 only) ──────────────────────────────────── */}
@@ -623,10 +640,33 @@ export default function HomeScreen() {
                 placeholderColor={placeholderColor}
                 inkColor={inkColor}
                 caretColor={tokens["accent-caret"]}
+                accentColor={accent}
+                accentOnColor={accentOn}
+                surfaceChipColor={surfaceChip}
+                tertiaryColor={tokens["text-tertiary"]}
                 inputRef={(r) => {
                   followUpRefs.current[idx] = r;
                 }}
                 isLast={idx === lastRunIdx}
+                showSend={idx === lastRunIdx && !inflight}
+                canSend={
+                  idx === lastRunIdx && run.followUp.trim().length > 0
+                }
+                isStreaming={isStreaming}
+                onSend={handleSend}
+                onStop={handleStop}
+                onFocus={() => {
+                  // Wait for the keyboard to start rising, then scroll the
+                  // focused input into view. Android with adjustResize will
+                  // shrink the layout but doesn't auto-scroll a scrollview;
+                  // scrollToEnd is sufficient since follow-ups live at the
+                  // tail of the scroll content.
+                  setTimeout(
+                    () =>
+                      scrollRef.current?.scrollToEnd({ animated: true }),
+                    150,
+                  );
+                }}
               />
             </View>
           ))}
@@ -997,15 +1037,37 @@ function FollowUpInput(props: {
   placeholderColor: string;
   inkColor: string;
   caretColor: string;
+  accentColor: string;
+  accentOnColor: string;
+  surfaceChipColor: string;
+  tertiaryColor: string;
   inputRef: (r: TextInput | null) => void;
   isLast: boolean;
+  /** Only render the inline send button under the LAST follow-up — that's
+   *  the only one the user can actually dispatch. Older follow-ups are just
+   *  history (a record of what was sent that turn). */
+  showSend: boolean;
+  canSend: boolean;
+  isStreaming: boolean;
+  onSend: () => void;
+  onStop: () => void;
+  onFocus: () => void;
 }) {
   return (
-    <View style={{ marginTop: 16, marginBottom: props.isLast ? 0 : 4 }}>
+    <View
+      style={{
+        marginTop: 16,
+        marginBottom: props.isLast ? 0 : 4,
+        flexDirection: "row",
+        alignItems: "flex-end",
+        gap: 10,
+      }}
+    >
       <TextInput
         ref={props.inputRef}
         value={props.value}
         onChangeText={props.onChangeText}
+        onFocus={props.onFocus}
         multiline
         placeholder={props.placeholder}
         placeholderTextColor={props.placeholderColor}
@@ -1013,6 +1075,7 @@ function FollowUpInput(props: {
         scrollEnabled={false}
         textAlignVertical="top"
         style={{
+          flex: 1,
           minHeight: 40,
           fontFamily: "Inter-Regular",
           fontSize: typography.body.fontSize,
@@ -1024,6 +1087,48 @@ function FollowUpInput(props: {
           textAlignVertical: "top",
         }}
       />
+      {props.showSend ? (
+        <Pressable
+          onPress={props.isStreaming ? props.onStop : props.onSend}
+          disabled={!props.isStreaming && !props.canSend}
+          accessibilityRole="button"
+          accessibilityLabel={
+            props.isStreaming ? "Stop dispatch" : "Send follow-up"
+          }
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={({ pressed }) => ({
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+            backgroundColor:
+              props.isStreaming || props.canSend
+                ? props.accentColor
+                : props.surfaceChipColor,
+            alignItems: "center",
+            justifyContent: "center",
+            opacity: props.isStreaming || props.canSend ? 1 : 0.55,
+            transform: [{ scale: pressed ? 0.94 : 1 }],
+            shadowColor: "#000",
+            shadowOpacity: props.canSend ? 0.18 : 0,
+            shadowRadius: 6,
+            shadowOffset: { width: 0, height: 2 },
+            elevation: props.canSend ? 3 : 0,
+            flexShrink: 0,
+          })}
+        >
+          {props.isStreaming ? (
+            <StopIcon size={16} color={props.accentOnColor} weight="fill" />
+          ) : (
+            <ArrowUpIcon
+              size={18}
+              color={
+                props.canSend ? props.accentOnColor : props.tertiaryColor
+              }
+              weight="bold"
+            />
+          )}
+        </Pressable>
+      ) : null}
     </View>
   );
 }
