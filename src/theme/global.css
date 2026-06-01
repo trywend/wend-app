@@ -1,0 +1,93 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+   Wend — Paper & Ember semantic tokens as CSS variables.
+
+   These MUST mirror src/theme/tokens.ts exactly (that file is the source of
+   truth consumed by the runtime ThemeProvider; this file is what NativeWind's
+   Tailwind colors resolve against at bundle time). Light is :root; dark is the
+   `.dark` class, toggled by ThemeProvider via NativeWind's `darkMode: "class"`.
+
+   If you change a hex, change it in BOTH places (tokens.ts is canonical).
+--------------------------------------------------------------------------- */
+
+:root {
+  --surface-canvas: #fbfaf7;
+  --surface-elevated: #ffffff;
+  --surface-agent: #f7f4ee;
+  --surface-chip: #efeae0;
+
+  --border-hairline: #e2dcd0;
+  --border-default: #c9c1b2;
+  --border-focus: #d85a3c;
+
+  --text-primary: #1a1714;
+  --text-secondary: #6b645a;
+  --text-tertiary: #9a9388;
+  --text-agent: #3a342d;
+  --text-placeholder: #8e8779;
+
+  --accent-default: #d85a3c;
+  --accent-pressed: #b0432a;
+  --accent-caret: #d85a3c;
+  --accent-on: #ffffff;
+
+  --status-running: #c28a1f;
+  --status-done: #4f7a5e;
+  --status-failed: #b3464a;
+  --status-warn: #c28a1f;
+
+  --diff-add-bg: #e8f2ea;
+  --diff-add-gutter: #4f7a5e;
+  --diff-del-bg: #f6e5e2;
+  --diff-del-gutter: #b3464a;
+
+  --syntax-keyword: #7a5bc9;
+  --syntax-string: #4f7a5e;
+  --syntax-number: #c28a1f;
+  --syntax-comment: #9a9388;
+  --syntax-function: #3a6da8;
+  --syntax-type: #d85a3c;
+}
+
+.dark:root,
+.dark {
+  --surface-canvas: #161412;
+  --surface-elevated: #1e1b18;
+  --surface-agent: #221e1a;
+  --surface-chip: #2a2622;
+
+  --border-hairline: #3a332c;
+  --border-default: #5c544a;
+  --border-focus: #d85a3c;
+
+  --text-primary: #f5f1ea;
+  --text-secondary: #d6cfc2;
+  --text-tertiary: #a39b8e;
+  --text-agent: #f5f1ea;
+  --text-placeholder: #8a8278;
+
+  --accent-default: #d85a3c;
+  --accent-pressed: #c04f33;
+  --accent-caret: #e87155;
+  --accent-on: #ffffff;
+
+  --status-running: #daa13b;
+  --status-done: #7da88b;
+  --status-failed: #d26a6e;
+  --status-warn: #daa13b;
+
+  --diff-add-bg: #1f2d24;
+  --diff-add-gutter: #7da88b;
+  --diff-del-bg: #2e1f1d;
+  --diff-del-gutter: #d26a6e;
+
+  --syntax-keyword: #b49bee;
+  --syntax-string: #7da88b;
+  --syntax-number: #daa13b;
+  --syntax-comment: #a39b8e;
+  --syntax-function: #8db6e5;
+  --syntax-type: #e87155;
+}

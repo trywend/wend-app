@@ -1,0 +1,236 @@
+/**
+ * Wend — useDispatch hook.
+ *
+ * Phase 2 dispatch primitive. POSTs a prompt to the spike daemon's `/run`
+ * endpoint and parses the SSE stream of `claude -p --output-format=stream-json`
+ * frames into a small, app-friendly event shape:
+ *
+ *   - text       — assistant tokens (accumulate to render streaming response)
+ *   - tool_use   — Claude called a tool (we just surface the name; the daemon
+ *                  doesn't yet route permission requests, that's Phase 5)
+ *   - result     — terminal frame from Claude with session id + cost + ms
+ *   - error      — anything went wrong (network, 401, daemon crash)
+ *   - done       — stream ended cleanly
+ *
+ * Uses `expo/fetch` (not the global fetch) — only `expo/fetch` exposes the
+ * WHATWG ReadableStream on response.body in Expo SDK 56, which we need to
+ * incrementally read SSE frames as they arrive. React Native's built-in
+ * fetch buffers the whole body.
+ *
+ * Phase 3+ swaps the URL/token for a per-device Tailscale endpoint, but the
+ * event shape stays — callers won't have to change.
+ */
+import { useCallback, useRef, useState } from "react";
+import { fetch as expoFetch } from "expo/fetch";
+
+import {
+  daemonCwd,
+  daemonToken,
+  daemonUrl,
+  isDaemonConfigured,
+} from "@/config/env";
+
+export type DispatchEvent =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; name: string; input?: unknown }
+  | {
+      type: "result";
+      sessionId: string;
+      durationMs: number;
+      costUsd: number;
+      isError: boolean;
+    }
+  | { type: "error"; message: string }
+  | { type: "done" };
+
+export interface DispatchArgs {
+  prompt: string;
+  /** Override the daemon's working directory for this run. */
+  cwd?: string;
+  /** Continue a previous Claude session by id (enables --resume). */
+  sessionId?: string;
+  /** Called for every SSE frame parsed off the wire. */
+  onEvent: (event: DispatchEvent) => void;
+  /** Abort signal — passed straight through to expo/fetch. */
+  signal?: AbortSignal;
+}
+
+export interface UseDispatchResult {
+  /** Send a prompt to the daemon. Resolves when the stream ends. */
+  dispatch: (args: DispatchArgs) => Promise<void>;
+  /** True while a dispatch is in flight. */
+  running: boolean;
+  /** Imperatively cancel the in-flight dispatch. No-op when idle. */
+  cancel: () => void;
+  /** True once env vars are set; false means "show a config error". */
+  isConfigured: boolean;
+}
+
+export function useDispatch(): UseDispatchResult {
+  const [running, setRunning] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const dispatch = useCallback(async (args: DispatchArgs) => {
+    if (!isDaemonConfigured) {
+      args.onEvent({
+        type: "error",
+        message:
+          "Daemon URL or token missing — set EXPO_PUBLIC_DAEMON_URL and EXPO_PUBLIC_DAEMON_TOKEN in .env.local.",
+      });
+      args.onEvent({ type: "done" });
+      return;
+    }
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    // Chain caller's signal — if they abort, we abort our internal one too.
+    if (args.signal) {
+      if (args.signal.aborted) controller.abort();
+      else args.signal.addEventListener("abort", () => controller.abort());
+    }
+
+    setRunning(true);
+    try {
+      const url = `${daemonUrl.replace(/\/$/, "")}/run?t=${encodeURIComponent(
+        daemonToken,
+      )}`;
+      const res = await expoFetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          prompt: args.prompt,
+          cwd: args.cwd ?? daemonCwd ?? undefined,
+          sessionId: args.sessionId,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        args.onEvent({
+          type: "error",
+          message: `Daemon returned ${res.status} ${res.statusText || ""}`.trim(),
+        });
+        args.onEvent({ type: "done" });
+        return;
+      }
+      if (!res.body) {
+        args.onEvent({ type: "error", message: "Daemon returned no body" });
+        args.onEvent({ type: "done" });
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE frames are separated by a blank line.
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop() ?? "";
+        for (const frame of frames) parseFrame(frame, args.onEvent);
+      }
+      // Flush any final frame the daemon wrote without a trailing blank line.
+      if (buffer.trim()) parseFrame(buffer, args.onEvent);
+    } catch (err) {
+      if (controller.signal.aborted) {
+        args.onEvent({ type: "error", message: "Cancelled" });
+      } else {
+        args.onEvent({
+          type: "error",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    } finally {
+      args.onEvent({ type: "done" });
+      setRunning(false);
+      if (abortRef.current === controller) abortRef.current = null;
+    }
+  }, []);
+
+  const cancel = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
+  return { dispatch, running, cancel, isConfigured: isDaemonConfigured };
+}
+
+/* ───── Frame parser ─────────────────────────────────────────────────── */
+
+/**
+ * One SSE frame looks like:
+ *
+ *   event: stderr        ← optional; absent for default "message" events
+ *   data: <json line>    ← mandatory; may be multi-line, joined with newlines
+ *
+ * The spike daemon emits Claude's stream-json events directly inside `data:`,
+ * plus a final `event: done` frame. We unwrap to the typed events above.
+ */
+function parseFrame(rawFrame: string, onEvent: (e: DispatchEvent) => void) {
+  const lines = rawFrame.split("\n");
+  let eventType = "message";
+  const dataParts: string[] = [];
+  for (const line of lines) {
+    if (line.startsWith("event: ")) eventType = line.slice(7).trim();
+    else if (line.startsWith("data: ")) dataParts.push(line.slice(6));
+    else if (line.startsWith("data:")) dataParts.push(line.slice(5));
+  }
+  const data = dataParts.join("\n").trim();
+  if (!data) return;
+
+  if (eventType === "stderr") {
+    // Surface stderr as an error event — usually noise during normal runs,
+    // but if Claude blows up we want to see it.
+    try {
+      const text = JSON.parse(data);
+      onEvent({
+        type: "error",
+        message: typeof text === "string" ? text : data,
+      });
+    } catch {
+      onEvent({ type: "error", message: data });
+    }
+    return;
+  }
+  if (eventType === "done") {
+    // Daemon signals end-of-stream; the outer reader loop will also exit on
+    // EOF, so we don't fire `done` here (the finally block does).
+    return;
+  }
+
+  // Default `message` event — payload is one Claude stream-json line.
+  let parsed: any;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    return; // non-JSON; skip
+  }
+
+  if (parsed.type === "assistant" && parsed.message?.content) {
+    for (const c of parsed.message.content) {
+      if (c.type === "text" && typeof c.text === "string") {
+        onEvent({ type: "text", text: c.text });
+      } else if (c.type === "tool_use" && typeof c.name === "string") {
+        onEvent({ type: "tool_use", name: c.name, input: c.input });
+      }
+    }
+    return;
+  }
+
+  if (parsed.type === "result") {
+    onEvent({
+      type: "result",
+      sessionId: String(parsed.session_id ?? ""),
+      durationMs: Number(parsed.duration_ms ?? 0),
+      costUsd: Number(parsed.total_cost_usd ?? 0),
+      isError: Boolean(parsed.is_error),
+    });
+    return;
+  }
+
+  // system / user / tool_result frames: we ignore for now. The result frame
+  // is what closes the run; intermediate types are just protocol scaffolding.
+}
