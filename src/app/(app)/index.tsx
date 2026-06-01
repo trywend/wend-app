@@ -63,9 +63,12 @@ import {
 import { useTheme } from "@/theme/ThemeProvider";
 import { typography } from "@/theme/tokens";
 import { useNoteEditor } from "@/lib/notes/useNoteEditor";
+import { useNotesList } from "@/lib/notes/useNotesList";
 import { useDispatch, type DispatchEvent } from "@/lib/dispatch/useDispatch";
-import type { PersistedRun } from "@/lib/notes-storage";
+import { createNote, type PersistedRun } from "@/lib/notes-storage";
+import { useAuthStore } from "@/store/authSlice";
 import { Text } from "@/components/primitives";
+import { InboxSheet } from "@/components/InboxSheet";
 import {
   AgentRunBlock,
   type AgentRunBlockState,
@@ -95,6 +98,12 @@ const INITIAL_INFLIGHT: InflightRun | null = null;
 export default function HomeScreen() {
   const { tokens } = useTheme();
   const insets = useSafeAreaInsets();
+  // currentNoteId switches which note the editor shows. `undefined` means
+  // "load the most recent draft" (loadOrCreateDraftNote). Tapping a card in
+  // the inbox sets this; the FAB creates a new note and sets it here.
+  const [currentNoteId, setCurrentNoteId] = useState<string | undefined>(
+    undefined,
+  );
   const {
     title,
     body,
@@ -103,11 +112,13 @@ export default function HomeScreen() {
     setBody,
     appendRun,
     updateRunFollowUp,
-  } = useNoteEditor();
+  } = useNoteEditor(currentNoteId);
+  const { refresh: refreshNotes } = useNotesList();
+  const userId = useAuthStore((s) => s.user?.id);
   const [bodyFocused, setBodyFocused] = useState(true);
   const [chipDismissed, setChipDismissed] = useState(false);
   const [inflight, setInflight] = useState<InflightRun | null>(INITIAL_INFLIGHT);
-  const [, setInboxOpen] = useState(false);
+  const [inboxOpen, setInboxOpen] = useState(false);
   const [coachmarkVisible, setCoachmarkVisible] = useState(false);
   const { dispatch, running, cancel, isConfigured: daemonConfigured } =
     useDispatch();
@@ -335,6 +346,9 @@ export default function HomeScreen() {
           };
           appendRun(persisted);
           setInflight(null);
+          // Refresh the inbox so the freshly-completed run reflects in any
+          // open or next-opened inbox sheet.
+          void refreshNotes();
           // Focus the freshly-mounted follow-up input so the user can keep
           // typing without an extra tap.
           setTimeout(() => {
@@ -359,6 +373,32 @@ export default function HomeScreen() {
 
   function handleDismissChip() {
     setChipDismissed(true);
+  }
+
+  /* ─── Inbox sheet handlers ──────────────────────────────────────────── */
+  function handleSelectNote(noteId: string) {
+    setCurrentNoteId(noteId);
+    setInboxOpen(false);
+    // Clear any inflight state from the previous note — sessionId belongs to
+    // that note's last run, not this one. The new note loads fresh via
+    // useNoteEditor(noteId).
+    setInflight(null);
+    setChipDismissed(false);
+  }
+
+  async function handleNewNote() {
+    if (!userId) return;
+    try {
+      const { note } = await createNote(userId);
+      setCurrentNoteId(note.id);
+      setInboxOpen(false);
+      setInflight(null);
+      setChipDismissed(false);
+      void refreshNotes();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[wend] failed to create note", err);
+    }
   }
 
   /* ─── Style helpers ────────────────────────────────────────────────── */
@@ -849,8 +889,17 @@ export default function HomeScreen() {
           </Pressable>
         ) : null}
 
-        {/* TODO: <InboxSheet ... /> renders here once Agent 2 ships it */}
       </KeyboardAvoidingView>
+
+      {/* Inbox sheet — rendered OUTSIDE the KeyboardAvoidingView so the sheet
+          uses its own safe-area math and the keyboard doesn't shove it
+          around. Component returns null when open=false (post-exit anim). */}
+      <InboxSheet
+        open={inboxOpen}
+        onClose={() => setInboxOpen(false)}
+        onSelectNote={handleSelectNote}
+        onNewNote={handleNewNote}
+      />
     </SafeAreaView>
   );
 }
