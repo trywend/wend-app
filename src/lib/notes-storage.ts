@@ -56,6 +56,12 @@ export interface Note {
   id: string;
   userId: string;
   title: string;
+  /** Per-note dispatch target (absolute path on the user's Mac). When null,
+   *  the dispatch hook falls back to EXPO_PUBLIC_DAEMON_CWD. Set per-note via
+   *  the project picker — keeps a note about the landing repo running in the
+   *  landing repo, not whatever the global default is. Phase 4 will derive
+   *  this automatically from content via the daemon-side project indexer. */
+  cwd: string | null;
   /** ms epoch — converted to/from Postgres `timestamptz` at the sync boundary. */
   createdAt: number;
   updatedAt: number;
@@ -134,9 +140,13 @@ async function readIndex(): Promise<Note[]> {
   try {
     const raw = await AsyncStorage.getItem(INDEX_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw) as Note[];
+    const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed;
+    // Backfill missing fields so older persisted notes don't break the
+    // current schema (cwd was added in smart-routing v1).
+    return parsed
+      .map((p) => normalizeNote(p))
+      .filter((n): n is Note => n !== null);
   } catch (err) {
     console.warn("[notes-storage] readIndex failed:", err);
     return [];
@@ -200,9 +210,30 @@ function makeEmptyNote(userId: string): Note {
     id: newId(),
     userId,
     title: "",
+    cwd: null,
     createdAt: now,
     updatedAt: now,
     archivedAt: null,
+  };
+}
+
+/**
+ * Backfill any persisted note that pre-dates the `cwd` field. Reading old
+ * data shouldn't crash; treat missing as null. Centralized here so every
+ * read path runs through it.
+ */
+function normalizeNote(raw: unknown): Note | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const n = raw as Partial<Note> & Record<string, unknown>;
+  if (typeof n.id !== "string" || typeof n.userId !== "string") return null;
+  return {
+    id: n.id,
+    userId: n.userId,
+    title: typeof n.title === "string" ? n.title : "",
+    cwd: typeof n.cwd === "string" ? n.cwd : null,
+    createdAt: typeof n.createdAt === "number" ? n.createdAt : Date.now(),
+    updatedAt: typeof n.updatedAt === "number" ? n.updatedAt : Date.now(),
+    archivedAt: typeof n.archivedAt === "number" ? n.archivedAt : null,
   };
 }
 
@@ -280,10 +311,11 @@ export async function saveNote(args: {
   title?: string;
   bodyText?: string;
   runs?: PersistedRun[];
+  cwd?: string | null;
 }): Promise<void> {
-  const { id, title, bodyText, runs } = args;
+  const { id, title, bodyText, runs, cwd } = args;
 
-  // Update index (title + updatedAt). One read-modify-write per save.
+  // Update index (title + cwd + updatedAt). One read-modify-write per save.
   const all = await readIndex();
   const idx = all.findIndex((n) => n.id === id);
   if (idx === -1) {
@@ -294,6 +326,7 @@ export async function saveNote(args: {
   const next: Note = {
     ...prev,
     title: title !== undefined ? title : prev.title,
+    cwd: cwd !== undefined ? cwd : prev.cwd,
     updatedAt: Date.now(),
   };
   all[idx] = next;

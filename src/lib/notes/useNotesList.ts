@@ -30,7 +30,12 @@ import {
 
 export interface NoteListItem {
   id: string;
+  /** Raw title field (may be empty). */
   title: string;
+  /** UI-ready title: title if non-empty, else first non-empty body line, else
+   *  "Untitled". The InboxSheet should always render this, not raw `title`,
+   *  to avoid the empty-card-title look on freshly-created notes. */
+  displayTitle: string;
   updatedAt: number;
   /** See file header — "running" is never produced in Phase 2. */
   status: "running" | "done" | "notes";
@@ -67,9 +72,26 @@ function computeItem(
   // lines (the caller should hide the "N lines" pill when 0).
   const bodyLineCount = bodyText.length === 0 ? 0 : bodyText.split("\n").length;
 
+  // Title fallback: empty title → first non-empty body line (trimmed, capped
+  // at ~60 chars) → "Untitled". Avoids blank cards when the user hasn't named
+  // a note yet (which is most of them in this flow).
+  const trimmedTitle = title.trim();
+  let displayTitle = trimmedTitle;
+  if (!displayTitle) {
+    const firstLine = bodyText
+      .split("\n")
+      .map((s) => s.trim())
+      .find((s) => s.length > 0);
+    if (firstLine) {
+      displayTitle = firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine;
+    }
+  }
+  if (!displayTitle) displayTitle = "Untitled";
+
   return {
     id,
     title,
+    displayTitle,
     updatedAt,
     status,
     lastRun: lastRun

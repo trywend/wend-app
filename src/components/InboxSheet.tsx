@@ -517,8 +517,14 @@ function NoteCard({
           ? tokens.borderColor
           : tokens.borderColor;
 
+  // Prefer the hook's displayTitle (handles first-line fallback for empty
+  // titles); fall back inline for older callers without that field.
   const titleText =
-    note.title.trim().length > 0 ? note.title : "Untitled note";
+    note.displayTitle?.trim().length
+      ? note.displayTitle
+      : note.title.trim().length > 0
+        ? note.title
+        : "Untitled";
 
   return (
     <Pressable

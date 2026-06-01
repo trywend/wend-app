@@ -40,8 +40,12 @@ export interface UseNoteEditorResult {
   title: string;
   body: string;
   runs: PersistedRun[];
+  /** Per-note dispatch CWD. Null falls back to EXPO_PUBLIC_DAEMON_CWD. */
+  cwd: string | null;
   setTitle: (s: string) => void;
   setBody: (s: string) => void;
+  /** Set this note's dispatch target. Pass null to clear (use env default). */
+  setCwd: (cwd: string | null) => void;
   /** Append a completed run to the chronological history. */
   appendRun: (run: PersistedRun) => void;
   /** Update the follow-up text typed under the run at index `idx`. */
@@ -60,6 +64,7 @@ export function useNoteEditor(noteId?: string): UseNoteEditorResult {
   const [title, setTitleState] = useState<string>("");
   const [body, setBodyState] = useState<string>("");
   const [runs, setRunsState] = useState<PersistedRun[]>([]);
+  const [cwd, setCwdState] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isDirty, setIsDirty] = useState<boolean>(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
@@ -69,6 +74,7 @@ export function useNoteEditor(noteId?: string): UseNoteEditorResult {
   const titleRef = useRef<string>("");
   const bodyRef = useRef<string>("");
   const runsRef = useRef<PersistedRun[]>([]);
+  const cwdRef = useRef<string | null>(null);
   const idRef = useRef<string>("");
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Tracks which fields have been touched since the last successful save —
@@ -76,6 +82,7 @@ export function useNoteEditor(noteId?: string): UseNoteEditorResult {
   const pendingTitleRef = useRef<boolean>(false);
   const pendingBodyRef = useRef<boolean>(false);
   const pendingRunsRef = useRef<boolean>(false);
+  const pendingCwdRef = useRef<boolean>(false);
   // Prevents the unmount flush from running before initial load completes.
   const loadedRef = useRef<boolean>(false);
 
@@ -104,9 +111,11 @@ export function useNoteEditor(noteId?: string): UseNoteEditorResult {
             setTitleState(result.note.title);
             setBodyState(result.bodyText);
             setRunsState(result.runs);
+            setCwdState(result.note.cwd);
             titleRef.current = result.note.title;
             bodyRef.current = result.bodyText;
             runsRef.current = result.runs;
+            cwdRef.current = result.note.cwd;
             idRef.current = result.note.id;
             setLastSavedAt(result.note.updatedAt);
           } else {
@@ -119,9 +128,11 @@ export function useNoteEditor(noteId?: string): UseNoteEditorResult {
             setTitleState(fallback.note.title);
             setBodyState(fallback.bodyText);
             setRunsState(fallback.runs);
+            setCwdState(fallback.note.cwd);
             titleRef.current = fallback.note.title;
             bodyRef.current = fallback.bodyText;
             runsRef.current = fallback.runs;
+            cwdRef.current = fallback.note.cwd;
             idRef.current = fallback.note.id;
             setLastSavedAt(fallback.note.updatedAt);
           }
@@ -133,9 +144,11 @@ export function useNoteEditor(noteId?: string): UseNoteEditorResult {
           setTitleState(note.title);
           setBodyState(bodyText);
           setRunsState(loadedRuns);
+          setCwdState(note.cwd);
           titleRef.current = note.title;
           bodyRef.current = bodyText;
           runsRef.current = loadedRuns;
+          cwdRef.current = note.cwd;
           idRef.current = note.id;
           setLastSavedAt(note.updatedAt);
         }
@@ -167,21 +180,25 @@ export function useNoteEditor(noteId?: string): UseNoteEditorResult {
       title?: string;
       bodyText?: string;
       runs?: PersistedRun[];
+      cwd?: string | null;
     } = { id };
     if (pendingTitleRef.current) payload.title = titleRef.current;
     if (pendingBodyRef.current) payload.bodyText = bodyRef.current;
     if (pendingRunsRef.current) payload.runs = runsRef.current;
+    if (pendingCwdRef.current) payload.cwd = cwdRef.current;
 
     if (
       payload.title === undefined &&
       payload.bodyText === undefined &&
-      payload.runs === undefined
+      payload.runs === undefined &&
+      payload.cwd === undefined
     )
       return;
 
     pendingTitleRef.current = false;
     pendingBodyRef.current = false;
     pendingRunsRef.current = false;
+    pendingCwdRef.current = false;
 
     try {
       await saveNote(payload);
@@ -193,6 +210,7 @@ export function useNoteEditor(noteId?: string): UseNoteEditorResult {
       if (payload.title !== undefined) pendingTitleRef.current = true;
       if (payload.bodyText !== undefined) pendingBodyRef.current = true;
       if (payload.runs !== undefined) pendingRunsRef.current = true;
+      if (payload.cwd !== undefined) pendingCwdRef.current = true;
     }
   }, []);
 
@@ -241,6 +259,18 @@ export function useNoteEditor(noteId?: string): UseNoteEditorResult {
     [scheduleFlush],
   );
 
+  const setCwd = useCallback(
+    (next: string | null) => {
+      const trimmed = next === null ? null : next.trim() || null;
+      cwdRef.current = trimmed;
+      pendingCwdRef.current = true;
+      setCwdState(trimmed);
+      setIsDirty(true);
+      scheduleFlush();
+    },
+    [scheduleFlush],
+  );
+
   const updateRunFollowUp = useCallback(
     (idx: number, text: string) => {
       const current = runsRef.current;
@@ -271,7 +301,8 @@ export function useNoteEditor(noteId?: string): UseNoteEditorResult {
       if (
         pendingTitleRef.current ||
         pendingBodyRef.current ||
-        pendingRunsRef.current
+        pendingRunsRef.current ||
+        pendingCwdRef.current
       ) {
         void flush();
       }
@@ -282,8 +313,10 @@ export function useNoteEditor(noteId?: string): UseNoteEditorResult {
     title,
     body,
     runs,
+    cwd,
     setTitle,
     setBody,
+    setCwd,
     appendRun,
     updateRunFollowUp,
     isLoading,

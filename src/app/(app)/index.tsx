@@ -91,6 +91,11 @@ interface InflightRun {
   costUsd: number;
   status: "running" | "done" | "error";
   error: string | null;
+  /** Smart routing — the project the daemon resolved this run into. Populated
+   *  by the first `route` event from the SSE stream. */
+  routeName: string | null;
+  routeCwd: string | null;
+  routeSource: "auto" | "pinned" | "fallback" | null;
 }
 
 const INITIAL_INFLIGHT: InflightRun | null = null;
@@ -108,8 +113,10 @@ export default function HomeScreen() {
     title,
     body,
     runs,
+    cwd: noteCwd,
     setTitle,
     setBody,
+    setCwd,
     appendRun,
     updateRunFollowUp,
   } = useNoteEditor(currentNoteId);
@@ -254,6 +261,9 @@ export default function HomeScreen() {
         sessionId: null,
         durationMs: 0,
         costUsd: 0,
+        routeName: null,
+        routeCwd: null,
+        routeSource: null,
         status: "error",
         error:
           "Daemon not configured. Set EXPO_PUBLIC_DAEMON_URL + EXPO_PUBLIC_DAEMON_TOKEN in .env.local and RESTART Metro.",
@@ -276,6 +286,9 @@ export default function HomeScreen() {
       costUsd: 0,
       status: "running",
       error: null,
+      routeName: null,
+      routeCwd: null,
+      routeSource: null,
     });
 
     let accumulated = "";
@@ -288,6 +301,9 @@ export default function HomeScreen() {
 
     await dispatch({
       prompt,
+      // Pass noteCwd so the daemon respects per-note pins; null/undefined lets
+      // the daemon resolve via its indexer.
+      cwd: noteCwd ?? undefined,
       sessionId: sessionId ?? undefined,
       onEvent: (e: DispatchEvent) => {
         if (e.type === "text") {
@@ -298,6 +314,21 @@ export default function HomeScreen() {
         } else if (e.type === "tool_use") {
           tools.push(e.name);
           setInflight((s) => (s ? { ...s, toolUses: [...tools] } : s));
+        } else if (e.type === "route") {
+          // Daemon resolved a target. Surface it in the inflight block and,
+          // if this note had no pin, persist the resolution so follow-ups
+          // stay in the same project without re-running the resolver.
+          setInflight((s) =>
+            s
+              ? {
+                  ...s,
+                  routeName: e.name,
+                  routeCwd: e.cwd,
+                  routeSource: e.source,
+                }
+              : s,
+          );
+          if (!noteCwd && e.source === "auto") setCwd(e.cwd);
         } else if (e.type === "result") {
           resolvedSessionId = e.sessionId || resolvedSessionId;
           resolvedDuration = e.durationMs;
@@ -583,6 +614,7 @@ export default function HomeScreen() {
             <View key={run.id}>
               <AgentRunBlock
                 state={persistedRunToBlockState(run)}
+                projectName={projectBasename(noteCwd)}
               />
               <FollowUpInput
                 value={run.followUp}
@@ -605,6 +637,7 @@ export default function HomeScreen() {
             <AgentRunBlock
               state={inflightToBlockState(inflight)}
               onStop={handleStop}
+              projectName={inflight.routeName || projectBasename(noteCwd)}
             />
           ) : null}
         </ScrollView>
@@ -1053,4 +1086,13 @@ function extractDispatchSignal(title: string, body: string): string | null {
   const haystack = `${title}\n${body}`;
   const match = haystack.match(/\b[A-Z]{2,}-\d+\b/);
   return match ? match[0] : null;
+}
+
+/** Strip a path to its basename so the AgentRunBlock chip stays compact
+ *  ("/Users/agnij/Desktop/Wend/app" → "app"). Returns null for empty input. */
+function projectBasename(cwd: string | null): string | null {
+  if (!cwd) return null;
+  const trimmed = cwd.replace(/\/+$/, "");
+  const parts = trimmed.split("/");
+  return parts[parts.length - 1] || null;
 }

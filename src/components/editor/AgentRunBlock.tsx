@@ -56,9 +56,13 @@ export interface AgentRunBlockProps {
   state: AgentRunBlockState;
   /** Only rendered when status === "running". */
   onStop?: () => void;
+  /** Project the daemon resolved this run into — surfaced as the 3rd chip in
+   *  the header. `null`/undefined falls back to a static "Mac" label, matching
+   *  the design before smart routing landed. */
+  projectName?: string | null;
 }
 
-export function AgentRunBlock({ state, onStop }: AgentRunBlockProps) {
+export function AgentRunBlock({ state, onStop, projectName }: AgentRunBlockProps) {
   const { tokens } = useTheme();
   const running = state.status === "running";
   const errored = state.status === "error";
@@ -175,12 +179,16 @@ export function AgentRunBlock({ state, onStop }: AgentRunBlockProps) {
           <Dot color={tokens["text-tertiary"]} />
           <Text
             style={{
-              fontFamily: "Inter-Medium",
+              fontFamily: projectName ? "JetBrainsMono-Medium" : "Inter-Medium",
               fontSize: 12,
-              color: tokens["text-secondary"],
+              color: projectName
+                ? tokens["text-primary"]
+                : tokens["text-secondary"],
+              letterSpacing: projectName ? -0.2 : 0,
             }}
+            numberOfLines={1}
           >
-            Mac
+            {projectName || "Mac"}
           </Text>
           {ticket ? (
             <>

@@ -40,6 +40,17 @@ export type DispatchEvent =
       costUsd: number;
       isError: boolean;
     }
+  | {
+      /** Daemon resolved (or echoed) the project this run is happening in.
+       *  Fired BEFORE any text frame, so the UI can render the project chip
+       *  immediately. `source` distinguishes auto-routing from a caller pin
+       *  vs the daemon's homedir fallback. */
+      type: "route";
+      cwd: string;
+      name: string;
+      confidence: number;
+      source: "auto" | "pinned" | "fallback";
+    }
   | { type: "error"; message: string }
   | { type: "done" };
 
@@ -198,6 +209,28 @@ function parseFrame(rawFrame: string, onEvent: (e: DispatchEvent) => void) {
   if (eventType === "done") {
     // Daemon signals end-of-stream; the outer reader loop will also exit on
     // EOF, so we don't fire `done` here (the finally block does).
+    return;
+  }
+  if (eventType === "route") {
+    // Smart routing payload from the daemon — emitted before any Claude
+    // frame. Shape: { cwd, name, confidence, source }.
+    try {
+      const r = JSON.parse(data);
+      if (typeof r.cwd === "string" && typeof r.name === "string") {
+        onEvent({
+          type: "route",
+          cwd: r.cwd,
+          name: r.name,
+          confidence: typeof r.confidence === "number" ? r.confidence : 0,
+          source:
+            r.source === "auto" || r.source === "pinned" || r.source === "fallback"
+              ? r.source
+              : "auto",
+        });
+      }
+    } catch {
+      // bad route payload — ignore, the rest of the stream still works
+    }
     return;
   }
 
