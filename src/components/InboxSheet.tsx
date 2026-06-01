@@ -401,8 +401,13 @@ function InboxSheetMounted({
         <View
           pointerEvents="box-none"
           style={{
-            alignItems: "flex-end",
-            paddingRight: 24,
+            // Bottom-LEFT (not the conventional bottom-right) because in
+            // Expo dev builds the launcher floats a gray gear in the
+            // bottom-right corner and was completely covering our FAB. In
+            // production the launcher won't exist; we'll move this back to
+            // bottom-right at that point.
+            alignItems: "flex-start",
+            paddingLeft: 24,
             paddingBottom: 32,
           }}
         >
@@ -411,19 +416,19 @@ function InboxSheetMounted({
             accessibilityRole="button"
             accessibilityLabel="New note"
             style={({ pressed }) => ({
-              width: 60,
-              height: 60,
-              borderRadius: 30,
+              width: 64,
+              height: 64,
+              borderRadius: 32,
               backgroundColor: "#D85A3C",
               alignItems: "center",
               justifyContent: "center",
               shadowColor: "#000",
-              shadowOffset: { width: 0, height: 8 },
-              shadowOpacity: 0.28,
-              shadowRadius: 16,
-              elevation: 12,
+              shadowOffset: { width: 0, height: 10 },
+              shadowOpacity: 0.32,
+              shadowRadius: 18,
+              elevation: 14,
               transform: [{ scale: pressed ? 0.94 : 1 }],
-              borderWidth: 1,
+              borderWidth: 2,
               borderColor: "#B0432A",
             })}
           >
