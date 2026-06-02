@@ -65,10 +65,21 @@ import { typography } from "@/theme/tokens";
 import { useNoteEditor } from "@/lib/notes/useNoteEditor";
 import { useNotesList } from "@/lib/notes/useNotesList";
 import { useDispatch, type DispatchEvent } from "@/lib/dispatch/useDispatch";
-import { createNote, type PersistedRun } from "@/lib/notes-storage";
+import {
+  archiveNote,
+  createNote,
+  deleteNote,
+  type PersistedRun,
+} from "@/lib/notes-storage";
 import { useAuthStore } from "@/store/authSlice";
+import { useSignOut } from "@/auth/client";
 import { Text } from "@/components/primitives";
 import { InboxSheet } from "@/components/InboxSheet";
+import { SettingsSheet } from "@/components/SettingsSheet";
+import { IntegrationsSheet } from "@/components/IntegrationsSheet";
+import { ConnectGitHubSheet } from "@/components/ConnectGitHubSheet";
+import { NoteActionsSheet } from "@/components/NoteActionsSheet";
+import { HealthDot } from "@/components/HealthDot";
 import {
   AgentRunBlock,
   type AgentRunBlockState,
@@ -119,6 +130,7 @@ export default function HomeScreen() {
     setCwd,
     appendRun,
     updateRunFollowUp,
+    noteId: resolvedNoteId,
   } = useNoteEditor(currentNoteId);
   const { refresh: refreshNotes } = useNotesList();
   const userId = useAuthStore((s) => s.user?.id);
@@ -126,6 +138,14 @@ export default function HomeScreen() {
   const [chipDismissed, setChipDismissed] = useState(false);
   const [inflight, setInflight] = useState<InflightRun | null>(INITIAL_INFLIGHT);
   const [inboxOpen, setInboxOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [integrationsOpen, setIntegrationsOpen] = useState(false);
+  const [connectGitHubOpen, setConnectGitHubOpen] = useState(false);
+  const [noteActions, setNoteActions] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
+  const signOut = useSignOut();
   const [coachmarkVisible, setCoachmarkVisible] = useState(false);
   const { dispatch, running, cancel, isConfigured: daemonConfigured } =
     useDispatch();
@@ -321,6 +341,9 @@ export default function HomeScreen() {
       // the daemon resolve via its indexer.
       cwd: noteCwd ?? undefined,
       sessionId: sessionId ?? undefined,
+      // noteId publishes "this note is running" to the dispatchSlice so the
+      // inbox renders a running pip on the matching card.
+      noteId: resolvedNoteId || undefined,
       onEvent: (e: DispatchEvent) => {
         if (e.type === "text") {
           accumulated += e.text;
@@ -448,6 +471,67 @@ export default function HomeScreen() {
     }
   }
 
+  /* ─── Note actions (long-press → archive / delete) ─────────────────── */
+  function handleLongPressNote(noteId: string, displayTitle: string) {
+    setNoteActions({ id: noteId, title: displayTitle });
+  }
+
+  async function handleArchiveNote(noteId: string) {
+    try {
+      await archiveNote(noteId);
+      void refreshNotes();
+      // If we just archived the current note, drop to a fresh draft.
+      if (noteId === resolvedNoteId) {
+        setCurrentNoteId(undefined);
+        setInflight(null);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[wend] archive failed", err);
+    }
+  }
+
+  async function handleDeleteNote(noteId: string) {
+    try {
+      await deleteNote(noteId);
+      void refreshNotes();
+      if (noteId === resolvedNoteId) {
+        setCurrentNoteId(undefined);
+        setInflight(null);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[wend] delete failed", err);
+    }
+  }
+
+  /* ─── Retry a failed run ───────────────────────────────────────────── */
+  function handleRetry(_idx: number, failedRun: PersistedRun) {
+    // Re-send the failed run's prompt as a fresh dispatch. Don't reuse the
+    // sessionId — Claude likely didn't establish one when the run errored.
+    // The new dispatch becomes a brand-new entry in runs[]; the old errored
+    // entry stays as history so the user can see what happened.
+    if (isStreaming) return;
+    setBody(failedRun.prompt); // surface the prompt back in the body so the
+    // send goes through the normal handleSend path with a clean state.
+    setInflight(null);
+    setTimeout(() => void handleSend(), 50);
+  }
+
+  /* ─── Sign out ─────────────────────────────────────────────────────── */
+  async function handleSignOut() {
+    try {
+      await signOut();
+      // AuthGate will route to /(auth)/sign-in when Clerk fires the session
+      // change; no explicit navigation needed.
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[wend] sign-out failed", err);
+    } finally {
+      setSettingsOpen(false);
+    }
+  }
+
   /* ─── Style helpers ────────────────────────────────────────────────── */
   const inkColor = tokens["text-primary"];
   const subtleColor = tokens["text-secondary"];
@@ -488,16 +572,23 @@ export default function HomeScreen() {
               accessibilityLabel="Inbox"
               onPress={() => setInboxOpen(true)}
             />
-            <Text
-              style={{
-                fontFamily: "Inter-SemiBold",
-                fontSize: 17,
-                color: inkColor,
-                letterSpacing: -0.17,
-              }}
+            <View
+              style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
             >
-              Wend
-            </Text>
+              <Text
+                style={{
+                  fontFamily: "Inter-SemiBold",
+                  fontSize: 17,
+                  color: inkColor,
+                  letterSpacing: -0.17,
+                }}
+              >
+                Wend
+              </Text>
+              {/* Daemon-reachability pip, sits next to the wordmark so it's
+                  visible at a glance without taking nav-bar real estate. */}
+              <HealthDot size={8} />
+            </View>
             <IconButton
               icon={
                 <DotsThreeVerticalIcon
@@ -507,9 +598,7 @@ export default function HomeScreen() {
                 />
               }
               accessibilityLabel="More"
-              onPress={() => {
-                // Overflow menu not built yet — placeholder.
-              }}
+              onPress={() => setSettingsOpen(true)}
             />
           </Animated.View>
         ) : null}
@@ -632,6 +721,11 @@ export default function HomeScreen() {
               <AgentRunBlock
                 state={persistedRunToBlockState(run)}
                 projectName={projectBasename(noteCwd)}
+                onRetry={
+                  run.status === "error" && !isStreaming
+                    ? () => handleRetry(idx, run)
+                    : undefined
+                }
               />
               <FollowUpInput
                 value={run.followUp}
@@ -972,6 +1066,46 @@ export default function HomeScreen() {
         onClose={() => setInboxOpen(false)}
         onSelectNote={handleSelectNote}
         onNewNote={handleNewNote}
+        onLongPressNote={handleLongPressNote}
+      />
+
+      {/* Settings stack — three sheets that layer via zIndex (60 / 70 / 80).
+          Top-level Settings is what ⋮ in the top bar opens. */}
+      <SettingsSheet
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onSignOut={handleSignOut}
+        onOpenIntegrations={() => setIntegrationsOpen(true)}
+      />
+      <IntegrationsSheet
+        open={integrationsOpen}
+        onClose={() => setIntegrationsOpen(false)}
+        onConnectGitHub={() => setConnectGitHubOpen(true)}
+      />
+      <ConnectGitHubSheet
+        open={connectGitHubOpen}
+        onClose={() => setConnectGitHubOpen(false)}
+        onAuthorize={() => {
+          // eslint-disable-next-line no-console
+          console.log("[wend] GitHub authorize tapped");
+          setConnectGitHubOpen(false);
+        }}
+      />
+
+      {/* Note actions — long-press a card to open. Auto-height. */}
+      <NoteActionsSheet
+        open={noteActions !== null}
+        noteId={noteActions?.id ?? null}
+        noteTitle={noteActions?.title ?? null}
+        onClose={() => setNoteActions(null)}
+        onArchive={(id) => {
+          void handleArchiveNote(id);
+          setNoteActions(null);
+        }}
+        onDelete={(id) => {
+          void handleDeleteNote(id);
+          setNoteActions(null);
+        }}
       />
     </SafeAreaView>
   );

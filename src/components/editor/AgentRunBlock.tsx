@@ -31,6 +31,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import {
+  ArrowClockwiseIcon,
   CheckIcon,
   CircleNotchIcon,
   StopIcon,
@@ -60,9 +61,13 @@ export interface AgentRunBlockProps {
    *  the header. `null`/undefined falls back to a static "Mac" label, matching
    *  the design before smart routing landed. */
   projectName?: string | null;
+  /** Re-run the failed prompt. Only consulted when status === "error" — the
+   *  screen owns the actual re-dispatch logic; this block just renders the
+   *  pill and forwards the press. */
+  onRetry?: () => void;
 }
 
-export function AgentRunBlock({ state, onStop, projectName }: AgentRunBlockProps) {
+export function AgentRunBlock({ state, onStop, projectName, onRetry }: AgentRunBlockProps) {
   const { tokens } = useTheme();
   const running = state.status === "running";
   const errored = state.status === "error";
@@ -302,9 +307,19 @@ export function AgentRunBlock({ state, onStop, projectName }: AgentRunBlockProps
 
       {/* Error caption */}
       {errored && state.error ? (
-        <View style={{ paddingHorizontal: 14, paddingVertical: 12 }}>
+        <View
+          style={{
+            paddingHorizontal: 14,
+            paddingVertical: 12,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
           <Text
             style={{
+              flex: 1,
+              marginRight: onRetry ? 12 : 0,
               fontFamily: "Inter-Regular",
               fontSize: 13,
               color: tokens["text-secondary"],
@@ -312,6 +327,50 @@ export function AgentRunBlock({ state, onStop, projectName }: AgentRunBlockProps
           >
             {state.error}
           </Text>
+          {onRetry ? (
+            // NativeWind 4 cssInterop gotcha: backgroundColor placed inside
+            // a Pressable's function-form style is corrupted on iOS. So we
+            // paint the pill on the wrapper View and overlay a transparent
+            // Pressable inside for hit-tests + press feedback.
+            <View
+              style={{
+                position: "relative",
+                height: 32,
+                borderRadius: 16,
+                paddingHorizontal: 12,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: tokens["accent-default"],
+                overflow: "hidden",
+              }}
+            >
+              <ArrowClockwiseIcon size={14} color="#FFFFFF" weight="bold" />
+              <Text
+                style={{
+                  marginLeft: 6,
+                  fontFamily: "Inter-Medium",
+                  fontSize: 13,
+                  color: "#FFFFFF",
+                }}
+              >
+                Retry
+              </Text>
+              <Pressable
+                onPress={onRetry}
+                accessibilityRole="button"
+                accessibilityLabel="Retry dispatch"
+                style={({ pressed }) => ({
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  opacity: pressed ? 0.7 : 1,
+                })}
+              />
+            </View>
+          ) : null}
         </View>
       ) : null}
 

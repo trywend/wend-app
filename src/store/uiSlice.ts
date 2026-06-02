@@ -17,6 +17,14 @@ export type ThemePreference = "system" | "light" | "dark";
 interface UiState {
   themePreference: ThemePreference;
   setThemePreference: (p: ThemePreference) => void;
+  /** Visual-only toggle in Settings → Preferences → Notifications. No real
+   * notification plumbing yet; this just persists the switch state. */
+  notificationsEnabled: boolean;
+  setNotificationsEnabled: (v: boolean) => void;
+  /** Visual-only toggle in Integrations → Linear. Persisted so the switch
+   * survives relaunch; no actual workspace connection yet. */
+  linearConnected: boolean;
+  setLinearConnected: (v: boolean) => void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -28,6 +36,11 @@ export const useUiStore = create<UiState>()(
       // the Design Doc's earlier "system default" call for now.
       themePreference: "light",
       setThemePreference: (themePreference) => set({ themePreference }),
+      notificationsEnabled: false,
+      setNotificationsEnabled: (notificationsEnabled) =>
+        set({ notificationsEnabled }),
+      linearConnected: false,
+      setLinearConnected: (linearConnected) => set({ linearConnected }),
     }),
     {
       // Bumped key — old "wend.ui" persisted "system" on first launch and would

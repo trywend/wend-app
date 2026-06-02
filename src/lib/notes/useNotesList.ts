@@ -22,6 +22,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useAuthStore } from "@/store/authSlice";
+import { useDispatchStore } from "@/store/dispatchSlice";
 import {
   getNote,
   listNotes,
@@ -107,6 +108,7 @@ function computeItem(
 
 export function useNotesList(): UseNotesListResult {
   const userId = useAuthStore((s) => s.user?.id);
+  const runningNoteId = useDispatchStore((s) => s.runningNoteId);
   const [notes, setNotes] = useState<NoteListItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
@@ -161,5 +163,17 @@ export function useNotesList(): UseNotesListResult {
     void refresh();
   }, [refresh]);
 
-  return { notes, isLoading, refresh };
+  // Overlay the live "running" signal from the dispatchSlice. Storage only
+  // ever holds completed runs, so without this overlay the pip never flips
+  // on. We preserve the persisted status when a completed run already exists
+  // for that note (the "done" pill stays meaningful even mid-stream).
+  const decorated = runningNoteId
+    ? notes.map((n) =>
+        n.id === runningNoteId && n.status === "notes"
+          ? { ...n, status: "running" as const }
+          : n,
+      )
+    : notes;
+
+  return { notes: decorated, isLoading, refresh };
 }

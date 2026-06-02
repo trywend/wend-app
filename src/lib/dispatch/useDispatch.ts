@@ -29,6 +29,7 @@ import {
   daemonUrl,
   isDaemonConfigured,
 } from "@/config/env";
+import { useDispatchStore } from "@/store/dispatchSlice";
 
 export type DispatchEvent =
   | { type: "text"; text: string }
@@ -60,6 +61,11 @@ export interface DispatchArgs {
   cwd?: string;
   /** Continue a previous Claude session by id (enables --resume). */
   sessionId?: string;
+  /** Note this dispatch belongs to. When provided, the hook publishes it to
+   *  the dispatchSlice so the inbox can render a "running" pip while the
+   *  stream is in flight. Cleared on completion (success or error). Optional
+   *  to keep older callers working. */
+  noteId?: string;
   /** Called for every SSE frame parsed off the wire. */
   onEvent: (event: DispatchEvent) => void;
   /** Abort signal — passed straight through to expo/fetch. */
@@ -101,6 +107,10 @@ export function useDispatch(): UseDispatchResult {
     }
 
     setRunning(true);
+    // Publish the running note id so the inbox can light up its "running"
+    // pip. We deliberately set this AFTER the early-return path above — an
+    // un-configured daemon shouldn't flip the pip on at all.
+    useDispatchStore.getState().setRunningNoteId(args.noteId ?? null);
     try {
       const url = `${daemonUrl.replace(/\/$/, "")}/run?t=${encodeURIComponent(
         daemonToken,
@@ -158,6 +168,7 @@ export function useDispatch(): UseDispatchResult {
     } finally {
       args.onEvent({ type: "done" });
       setRunning(false);
+      useDispatchStore.getState().setRunningNoteId(null);
       if (abortRef.current === controller) abortRef.current = null;
     }
   }, []);

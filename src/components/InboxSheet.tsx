@@ -78,10 +78,13 @@ export interface InboxSheetProps {
   onSelectNote: (noteId: string) => void;
   onNewNote: () => void;
   onOpenSettings?: () => void;
+  /** Long-press on a note card. The parent surfaces a NoteActionsSheet
+   *  (archive/delete) from this callback. */
+  onLongPressNote?: (noteId: string, displayTitle: string) => void;
 }
 
 export function InboxSheet(props: InboxSheetProps): React.JSX.Element | null {
-  const { open, onClose, onSelectNote, onNewNote, onOpenSettings } = props;
+  const { open } = props;
 
   if (!open) return null;
   return <InboxSheetMounted {...props} />;
@@ -97,6 +100,7 @@ function InboxSheetMounted({
   onSelectNote,
   onNewNote,
   onOpenSettings,
+  onLongPressNote,
 }: InboxSheetProps) {
   const { tokens } = useTheme();
   const { notes, isLoading } = useNotesList();
@@ -362,23 +366,38 @@ function InboxSheetMounted({
           ) : visibleNotes.length === 0 ? (
             <EmptyState filter={filter} subtleColor={subtleColor} />
           ) : (
-            visibleNotes.map((note) => (
-              <NoteCard
-                key={note.id}
-                note={note}
-                onPress={() => onSelectNote(note.id)}
-                tokens={{
+            visibleNotes.map((note) => {
+              // Match the title-resolution logic from inside NoteCard so we
+              // hand the parent the same string it sees on screen.
+              const longPressTitle =
+                note.displayTitle?.trim().length
+                  ? note.displayTitle
+                  : note.title.trim().length > 0
+                    ? note.title
+                    : "Untitled";
+              return (
+                <NoteCard
+                  key={note.id}
+                  note={note}
+                  onPress={() => onSelectNote(note.id)}
+                  onLongPress={
+                    onLongPressNote
+                      ? () => onLongPressNote(note.id, longPressTitle)
+                      : undefined
+                  }
+                  tokens={{
                   cardBg,
                   inkColor,
                   subtleColor,
                   tertiaryColor,
                   borderColor,
                   accent,
-                  statusDoneColor,
-                  statusFailedColor,
-                }}
-              />
-            ))
+                    statusDoneColor,
+                    statusFailedColor,
+                  }}
+                />
+              );
+            })
           )}
         </ScrollView>
       </Animated.View>
@@ -519,10 +538,12 @@ interface NoteCardTokens {
 function NoteCard({
   note,
   onPress,
+  onLongPress,
   tokens,
 }: {
   note: NoteListItem;
   onPress: () => void;
+  onLongPress?: () => void;
   tokens: NoteCardTokens;
 }) {
   const failed = note.lastRun?.error != null;
@@ -547,6 +568,7 @@ function NoteCard({
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
       accessibilityRole="button"
       style={({ pressed }) => ({
         backgroundColor: tokens.cardBg,
