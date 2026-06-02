@@ -21,6 +21,7 @@
 import { useRef, useState } from "react";
 import {
   View,
+  Image,
   Pressable,
   ActivityIndicator,
   TextInput,
@@ -154,7 +155,22 @@ export default function SignInScreen() {
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: canvasBg }}>
+    <View style={{ flex: 1, backgroundColor: canvasBg }}>
+      {/* Full-bleed background — abstract paper-and-shapes art behind the
+          entire sign-in flow. Sits below SafeAreaView so it covers the
+          status bar and gesture inset edges too. */}
+      <Image
+        source={require("../../../assets/images/sign-in-bg.png")}
+        resizeMode="cover"
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+        }}
+      />
+      <SafeAreaView style={{ flex: 1 }}>
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={{ flex: 1 }}
@@ -197,7 +213,8 @@ export default function SignInScreen() {
           )}
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </View>
   );
 }
 
@@ -229,58 +246,66 @@ function StartView(props: {
   const { tokens, email, setEmail, onSendCode, onGoogle, onGithub, busy, busyProvider, error, clerkOk } = props;
   const accent = "#C25A3B"; // ember — could also pull from tokens.accent
 
+  // Dark ink color used by the OAuth pills + email send button. The design
+  // calls for the on-background token (#1d1b19) so the buttons feel like
+  // ink-stamped objects on the paper canvas behind. Pulling the literal
+  // here (not the theme token) so dark-mode doesn't accidentally invert.
+  const ink = "#1d1b19";
+  const inkOn = "#FFFFFF";
+
   return (
     <>
-      {/* Hero — fade up. Fixed natural height. */}
+      {/* Spacer above so the hero sits roughly in the upper third on tall
+          phones, balanced against the auth actions pinned to the bottom. */}
+      <View style={{ flex: 1 }} />
+
+      {/* Hero — small ember W mark + 2-line headline + WEND IT. caption. */}
       <Animated.View
         entering={FadeInDown.duration(700)}
-        style={{ alignItems: "center", marginTop: 32 }}
+        style={{ alignItems: "center" }}
       >
-        <View
+        <Text
           style={{
-            width: 64,
-            height: 64,
-            borderRadius: 16,
-            backgroundColor: accent,
-            alignItems: "center",
-            justifyContent: "center",
-            marginBottom: 24,
+            fontFamily: "JetBrainsMono-Medium",
+            fontSize: 36,
+            lineHeight: 36,
+            color: accent,
+            marginBottom: 20,
+            letterSpacing: -1,
           }}
         >
-          <Text
-            style={{ fontFamily: "JetBrainsMono-Medium", fontSize: 28, color: "#FFFFFF" }}
-          >
-            W
-          </Text>
-        </View>
+          W
+        </Text>
 
         <Text
           style={{
             fontFamily: "Inter-SemiBold",
-            fontSize: 30,
-            lineHeight: 36,
+            fontSize: 34,
+            lineHeight: 40,
             color: tokens.inkColor,
             textAlign: "center",
+            letterSpacing: -0.6,
           }}
         >
           Notes you can
         </Text>
         <Text
           style={{
-            fontFamily: "JetBrainsMono-Medium",
-            fontSize: 30,
-            lineHeight: 36,
+            fontFamily: "Inter-SemiBold",
+            fontSize: 34,
+            lineHeight: 40,
             color: accent,
             textAlign: "center",
+            letterSpacing: -0.6,
           }}
         >
           send.
         </Text>
         <Text
           style={{
-            marginTop: 12,
+            marginTop: 14,
             color: tokens.subtleColor,
-            letterSpacing: 3,
+            letterSpacing: 4,
             textTransform: "uppercase",
             fontSize: 11,
             fontFamily: "Inter-Medium",
@@ -294,19 +319,21 @@ function StartView(props: {
       <View style={{ flex: 1 }} />
 
       {/* Auth stack — anchored to bottom. */}
-      <View style={{ width: "100%" }}>
-        {/* Email row: rounded input + circular send-arrow button on the right. */}
+      <View style={{ width: "100%", gap: 24 }}>
+        {/* Email row — frosted pill with dark ink send button on the right.
+            The send button is INSIDE the input row (absolute-ish placement
+            via padding) per the new design mock. */}
         <View
           style={{
             flexDirection: "row",
             alignItems: "center",
-            backgroundColor: tokens.surfaceSubtle,
+            backgroundColor: "rgba(255,248,244,0.55)",
             borderRadius: 999,
             borderWidth: 1,
-            borderColor: tokens.borderColor,
-            paddingLeft: 20,
-            paddingRight: 6,
-            height: 56,
+            borderColor: "rgba(0,0,0,0.06)",
+            paddingLeft: 22,
+            paddingRight: 8,
+            height: 64,
           }}
         >
           <TextInput
@@ -339,18 +366,18 @@ function StartView(props: {
           >
             <View
               style={{
-                width: 44,
-                height: 44,
-                borderRadius: 22,
-                backgroundColor: tokens.pillBg,
+                width: 48,
+                height: 48,
+                borderRadius: 12,
+                backgroundColor: ink,
                 alignItems: "center",
                 justifyContent: "center",
               }}
             >
               {busyProvider === "email" ? (
-                <ActivityIndicator color={tokens.pillFg} />
+                <ActivityIndicator color={inkOn} />
               ) : (
-                <ArrowRightIcon size={18} color={tokens.pillFg} weight="bold" />
+                <ArrowRightIcon size={20} color={inkOn} weight="bold" />
               )}
             </View>
           </Pressable>
@@ -361,7 +388,6 @@ function StartView(props: {
           style={{
             flexDirection: "row",
             alignItems: "center",
-            marginVertical: 18,
           }}
         >
           <View style={{ flex: 1, height: 1, backgroundColor: tokens.borderColor }} />
@@ -380,96 +406,112 @@ function StartView(props: {
           <View style={{ flex: 1, height: 1, backgroundColor: tokens.borderColor }} />
         </View>
 
-        {/* Google pill — wrapper-View pattern. cssInterop strips bg + flex
-            properties from a Pressable's function-form style, so visual /
-            layout stays on a static inner View. See wend_nativewind_gotcha. */}
-        <Pressable
-          onPress={onGoogle}
-          disabled={busy}
-          accessibilityRole="button"
-          style={({ pressed }) => ({
-            opacity:
-              busy && busyProvider !== "google"
-                ? 0.4
-                : busy
-                  ? 0.7
-                  : pressed
-                    ? 0.85
-                    : 1,
-          })}
-        >
-          <View
-            style={{
-              height: 56,
-              borderRadius: 999,
-              backgroundColor: tokens.pillBg,
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
+        {/* OAuth pair — dark ink pills stacked with a paired-radius "joint"
+            (Google has a softer bottom edge, GitHub a softer top edge) so
+            they visually belong together as one segmented control. */}
+        <View style={{ gap: 12 }}>
+          <Pressable
+            onPress={onGoogle}
+            disabled={busy}
+            accessibilityRole="button"
+            style={({ pressed }) => ({
+              opacity:
+                busy && busyProvider !== "google"
+                  ? 0.4
+                  : busy
+                    ? 0.7
+                    : pressed
+                      ? 0.85
+                      : 1,
+            })}
           >
-            {busyProvider === "google" ? (
-              <ActivityIndicator color={tokens.pillFg} />
-            ) : (
-              <GoogleLogoIcon size={20} color={tokens.pillFg} weight="bold" />
-            )}
-            <Text
+            <View
               style={{
-                color: tokens.pillFg,
-                marginLeft: 10,
-                fontFamily: "Inter-SemiBold",
-                fontSize: 16,
+                height: 56,
+                borderTopLeftRadius: 28,
+                borderTopRightRadius: 28,
+                borderBottomLeftRadius: 10,
+                borderBottomRightRadius: 10,
+                backgroundColor: ink,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.16,
+                shadowRadius: 12,
+                elevation: 4,
               }}
             >
-              Continue with Google
-            </Text>
-          </View>
-        </Pressable>
+              {busyProvider === "google" ? (
+                <ActivityIndicator color={inkOn} />
+              ) : (
+                <GoogleLogoIcon size={20} color={inkOn} weight="bold" />
+              )}
+              <Text
+                style={{
+                  color: inkOn,
+                  marginLeft: 10,
+                  fontFamily: "Inter-Medium",
+                  fontSize: 16,
+                }}
+              >
+                Continue with Google
+              </Text>
+            </View>
+          </Pressable>
 
-        {/* GitHub pill — same wrapper-View pattern. */}
-        <Pressable
-          onPress={onGithub}
-          disabled={busy}
-          accessibilityRole="button"
-          style={({ pressed }) => ({
-            marginTop: 12,
-            opacity:
-              busy && busyProvider !== "github"
-                ? 0.4
-                : busy
-                  ? 0.7
-                  : pressed
-                    ? 0.85
-                    : 1,
-          })}
-        >
-          <View
-            style={{
-              height: 56,
-              borderRadius: 999,
-              backgroundColor: tokens.pillBg,
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
+          <Pressable
+            onPress={onGithub}
+            disabled={busy}
+            accessibilityRole="button"
+            style={({ pressed }) => ({
+              opacity:
+                busy && busyProvider !== "github"
+                  ? 0.4
+                  : busy
+                    ? 0.7
+                    : pressed
+                      ? 0.85
+                      : 1,
+            })}
           >
-            {busyProvider === "github" ? (
-              <ActivityIndicator color={tokens.pillFg} />
-            ) : (
-              <GithubLogoIcon size={20} color={tokens.pillFg} weight="bold" />
-            )}
-            <Text
+            <View
               style={{
-                color: tokens.pillFg,
-                marginLeft: 10,
-                fontFamily: "Inter-SemiBold",
-                fontSize: 16,
+                height: 56,
+                borderTopLeftRadius: 10,
+                borderTopRightRadius: 10,
+                borderBottomLeftRadius: 28,
+                borderBottomRightRadius: 28,
+                backgroundColor: ink,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 4 },
+                shadowOpacity: 0.16,
+                shadowRadius: 12,
+                elevation: 4,
               }}
             >
-              Continue with GitHub
-            </Text>
-          </View>
-        </Pressable>
+              {busyProvider === "github" ? (
+                <ActivityIndicator color={inkOn} />
+              ) : (
+                <GithubLogoIcon size={20} color={inkOn} weight="bold" />
+              )}
+              <Text
+                style={{
+                  color: inkOn,
+                  marginLeft: 10,
+                  fontFamily: "Inter-Medium",
+                  fontSize: 16,
+                }}
+              >
+                Continue with GitHub
+              </Text>
+            </View>
+          </Pressable>
+        </View>
 
         {/* Error / config caption */}
         {error ? (
