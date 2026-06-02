@@ -1067,6 +1067,12 @@ export default function HomeScreen() {
         onSelectNote={handleSelectNote}
         onNewNote={handleNewNote}
         onLongPressNote={handleLongPressNote}
+        onOpenSettings={() => {
+          // Close the inbox first so the settings sheet has the full screen
+          // without two layered sheets fighting for the same height.
+          setInboxOpen(false);
+          setSettingsOpen(true);
+        }}
       />
 
       {/* Settings stack — three sheets that layer via zIndex (60 / 70 / 80).

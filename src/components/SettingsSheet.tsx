@@ -153,7 +153,7 @@ function SettingsSheetMounted({
 
       {/* Panel — same 88% height as InboxSheet so the stack looks consistent. */}
       <Animated.View
-        entering={SlideInDown.springify().damping(18).mass(0.9)}
+        entering={SlideInDown.duration(260)}
         exiting={SlideOutDown.duration(220)}
         style={{
           position: "absolute",
@@ -518,28 +518,53 @@ function Row({
   trailing,
   hideCaret,
 }: RowProps) {
+  // Visual styling on a plain View wrapper — NativeWind's cssInterop strips
+  // flexDirection / gap from Pressable's function-form style, which caused
+  // the icon/label/chevron to stack vertically. The Pressable is now a
+  // transparent overlay that handles the tap.
   return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole={onPress ? "button" : undefined}
-      style={({ pressed }) => ({
+    <View
+      style={{
         flexDirection: "row",
         alignItems: "center",
-        paddingHorizontal: 16,
-        paddingVertical: 14,
-        gap: 16,
-        opacity: pressed && onPress ? 0.7 : 1,
-      })}
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+      }}
     >
-      <Icon size={22} color={subtleColor} weight="regular" />
-      <View style={{ flex: 1 }}>
-        <Text variant="body-em" style={{ color: inkColor }}>
+      <View
+        style={{
+          width: 32,
+          height: 32,
+          borderRadius: 999,
+          backgroundColor: `${subtleColor}14`, // ~8% alpha tint
+          alignItems: "center",
+          justifyContent: "center",
+          marginRight: 12,
+        }}
+      >
+        <Icon size={18} color={subtleColor} weight="regular" />
+      </View>
+      <View style={{ flex: 1, paddingRight: 8 }}>
+        <Text
+          style={{
+            color: inkColor,
+            fontFamily: "Inter-Medium",
+            fontSize: 15,
+            lineHeight: 20,
+          }}
+          numberOfLines={1}
+        >
           {label}
         </Text>
         {subtitle ? (
           <Text
-            variant="meta"
-            style={{ color: subtleColor, marginTop: 2 }}
+            style={{
+              color: subtleColor,
+              fontFamily: "Inter-Regular",
+              fontSize: 12,
+              lineHeight: 16,
+              marginTop: 1,
+            }}
             numberOfLines={1}
           >
             {subtitle}
@@ -548,9 +573,25 @@ function Row({
       </View>
       {trailing}
       {trailing == null && !hideCaret && onPress ? (
-        <CaretRightIcon size={16} color={tertiaryColor} weight="bold" />
+        <CaretRightIcon size={14} color={tertiaryColor} weight="bold" />
       ) : null}
-    </Pressable>
+      {onPress ? (
+        <Pressable
+          onPress={onPress}
+          accessibilityRole="button"
+          accessibilityLabel={label}
+          style={({ pressed }) => ({
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            opacity: pressed ? 0.55 : 0,
+            backgroundColor: subtleColor,
+          })}
+        />
+      ) : null}
+    </View>
   );
 }
 

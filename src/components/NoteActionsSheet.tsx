@@ -115,7 +115,7 @@ function NoteActionsSheetMounted({
       </Animated.View>
 
       <Animated.View
-        entering={SlideInDown.springify().damping(18).mass(0.9)}
+        entering={SlideInDown.duration(240)}
         exiting={SlideOutDown.duration(200)}
         style={{
           position: "absolute",

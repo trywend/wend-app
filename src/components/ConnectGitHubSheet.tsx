@@ -95,7 +95,7 @@ function ConnectGitHubSheetMounted({
       </Animated.View>
 
       <Animated.View
-        entering={SlideInDown.springify().damping(18).mass(0.9)}
+        entering={SlideInDown.duration(260)}
         exiting={SlideOutDown.duration(220)}
         style={{
           position: "absolute",
