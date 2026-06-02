@@ -54,6 +54,7 @@ import {
   CheckIcon,
   DotsThreeVerticalIcon,
   ListBulletsIcon,
+  MagnifyingGlassIcon,
   PaperclipIcon,
   StopIcon,
   TextHOneIcon,
@@ -75,6 +76,7 @@ import {
 import { useAuthStore } from "@/store/authSlice";
 import { useSignOut } from "@/auth/client";
 import { Text } from "@/components/primitives";
+import { CommandPalette } from "@/components/CommandPalette";
 import { InboxSheet } from "@/components/InboxSheet";
 import { SettingsSheet } from "@/components/SettingsSheet";
 import { IntegrationsSheet } from "@/components/IntegrationsSheet";
@@ -139,6 +141,7 @@ export default function HomeScreen() {
   const [chipDismissed, setChipDismissed] = useState(false);
   const [inflight, setInflight] = useState<InflightRun | null>(INITIAL_INFLIGHT);
   const [inboxOpen, setInboxOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [integrationsOpen, setIntegrationsOpen] = useState(false);
   const [connectGitHubOpen, setConnectGitHubOpen] = useState(false);
@@ -568,11 +571,24 @@ export default function HomeScreen() {
               borderBottomColor: borderColor,
             }}
           >
-            <IconButton
-              icon={<TrayIcon size={22} color={subtleColor} weight="regular" />}
-              accessibilityLabel="Inbox"
-              onPress={() => setInboxOpen(true)}
-            />
+            <View style={{ flexDirection: "row", alignItems: "center" }}>
+              <IconButton
+                icon={<TrayIcon size={22} color={subtleColor} weight="regular" />}
+                accessibilityLabel="Inbox"
+                onPress={() => setInboxOpen(true)}
+              />
+              <IconButton
+                icon={
+                  <MagnifyingGlassIcon
+                    size={22}
+                    color={subtleColor}
+                    weight="regular"
+                  />
+                }
+                accessibilityLabel="Search"
+                onPress={() => setCommandPaletteOpen(true)}
+              />
+            </View>
             <View
               style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
             >
@@ -1102,6 +1118,14 @@ export default function HomeScreen() {
           console.log("[wend] GitHub authorize tapped");
           setConnectGitHubOpen(false);
         }}
+      />
+
+      {/* Command palette — full-screen search overlay. */}
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        onSelectNote={handleSelectNote}
+        runs={runs}
       />
 
       {/* Note actions — long-press a card to open. Auto-height. */}
