@@ -211,16 +211,19 @@ function SettingsSheetMounted({
             accessibilityRole="button"
             accessibilityLabel="Close"
             hitSlop={8}
-            style={({ pressed }) => ({
-              width: 32,
-              height: 32,
-              borderRadius: 16,
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: pressed ? 0.6 : 1,
-            })}
+            style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
           >
-            <XIcon size={20} color={subtleColor} weight="regular" />
+            <View
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 16,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <XIcon size={20} color={subtleColor} weight="regular" />
+            </View>
           </Pressable>
         </View>
 
@@ -358,48 +361,48 @@ function SettingsSheetMounted({
           </Section>
 
           {/* -------------------- Log out (destructive) --------
-              Same wrapper-View + absolute Pressable pattern as InboxSheet's
-              FAB — the destructive red background must stay on the static
-              parent View so NativeWind's cssInterop doesn't drop it. */}
-          <View style={{ marginTop: 8 }}>
+              Pressable wraps content; function-style only carries opacity.
+              All visual + layout (red bg, height, row centering, shadow)
+              lives on a static-style inner View so cssInterop can't strip
+              it. Same proven pattern as the Row above. */}
+          <Pressable
+            onPress={onSignOut}
+            accessibilityRole="button"
+            accessibilityLabel="Log out"
+            android_ripple={{ color: "rgba(255,255,255,0.18)" }}
+            style={({ pressed }) => ({
+              marginTop: 8,
+              opacity: pressed ? 0.85 : 1,
+            })}
+          >
             <View
               style={{
-                width: "100%",
                 height: 52,
                 borderRadius: 14,
                 backgroundColor: failedColor,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
                 shadowColor: "#000",
                 shadowOffset: { width: 0, height: 2 },
                 shadowOpacity: 0.12,
                 shadowRadius: 6,
                 elevation: 2,
-                overflow: "hidden",
               }}
             >
-              <Pressable
-                onPress={onSignOut}
-                accessibilityRole="button"
-                accessibilityLabel="Log out"
-                style={({ pressed }) => ({
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  flexDirection: "row",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 8,
-                  opacity: pressed ? 0.85 : 1,
-                })}
+              <SignOutIcon size={20} color="#FFFFFF" weight="bold" />
+              <Text
+                style={{
+                  color: "#FFFFFF",
+                  marginLeft: 10,
+                  fontFamily: "Inter-SemiBold",
+                  fontSize: 15,
+                }}
               >
-                <SignOutIcon size={20} color="#FFFFFF" weight="bold" />
-                <Text variant="body-em" style={{ color: "#FFFFFF" }}>
-                  Log out
-                </Text>
-              </Pressable>
+                Log out
+              </Text>
             </View>
-          </View>
+          </Pressable>
         </ScrollView>
       </Animated.View>
     </View>
@@ -518,17 +521,19 @@ function Row({
   trailing,
   hideCaret,
 }: RowProps) {
-  // Visual styling on a plain View wrapper — NativeWind's cssInterop strips
-  // flexDirection / gap from Pressable's function-form style, which caused
-  // the icon/label/chevron to stack vertically. The Pressable is now a
-  // transparent overlay that handles the tap.
-  return (
+  // Pattern: Pressable WRAPS content. Function-style only carries `opacity`
+  // (single non-layout prop, safe with cssInterop). All visual + layout lives
+  // on the static-style inner View. Earlier attempts used an absolute-fill
+  // Pressable overlay with `position: "absolute"` inside the function-style
+  // — cssInterop stripped the positioning, so the overlay collapsed to inline
+  // 0×0 and no tap registered.
+  const content = (
     <View
       style={{
         flexDirection: "row",
         alignItems: "center",
         paddingHorizontal: 14,
-        paddingVertical: 10,
+        paddingVertical: 12,
       }}
     >
       <View
@@ -575,23 +580,20 @@ function Row({
       {trailing == null && !hideCaret && onPress ? (
         <CaretRightIcon size={14} color={tertiaryColor} weight="bold" />
       ) : null}
-      {onPress ? (
-        <Pressable
-          onPress={onPress}
-          accessibilityRole="button"
-          accessibilityLabel={label}
-          style={({ pressed }) => ({
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            opacity: pressed ? 0.55 : 0,
-            backgroundColor: subtleColor,
-          })}
-        />
-      ) : null}
     </View>
+  );
+
+  if (!onPress) return content;
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      android_ripple={{ color: `${subtleColor}22` }}
+      style={({ pressed }) => ({ opacity: pressed ? 0.55 : 1 })}
+    >
+      {content}
+    </Pressable>
   );
 }
 

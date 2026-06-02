@@ -163,16 +163,19 @@ function ConnectGitHubSheetMounted({
             accessibilityRole="button"
             accessibilityLabel="Cancel"
             hitSlop={8}
-            style={({ pressed }) => ({
-              width: 32,
-              height: 32,
-              borderRadius: 16,
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: pressed ? 0.6 : 1,
-            })}
+            style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
           >
-            <XIcon size={20} color={subtleColor} weight="regular" />
+            <View
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 16,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <XIcon size={20} color={subtleColor} weight="regular" />
+            </View>
           </Pressable>
         </View>
 
@@ -215,77 +218,74 @@ function ConnectGitHubSheetMounted({
           {/* Spacer pushes the actions to the bottom. */}
           <View style={{ flex: 1 }} />
 
-          {/* Authorize button — ember pill, full-width. */}
-          <View
-            style={{
-              width: "100%",
-              height: 52,
-              borderRadius: 999,
-              backgroundColor: accent,
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.12,
-              shadowRadius: 6,
-              elevation: 2,
-              overflow: "hidden",
+          {/* Authorize — ember pill, full-width. Pressable wraps content;
+              static-style inner View holds the visual + layout. */}
+          <Pressable
+            onPress={() => {
+              // eslint-disable-next-line no-console
+              console.log("[wend] GitHub authorize tapped");
+              onAuthorize();
             }}
+            accessibilityRole="button"
+            accessibilityLabel="Authorize"
+            style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}
           >
-            <Pressable
-              onPress={() => {
-                // eslint-disable-next-line no-console
-                console.log("[wend] GitHub authorize tapped");
-                onAuthorize();
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Authorize"
-              style={({ pressed }) => ({
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
+            <View
+              style={{
+                width: "100%",
+                height: 52,
+                borderRadius: 999,
+                backgroundColor: accent,
                 alignItems: "center",
                 justifyContent: "center",
-                opacity: pressed ? 0.85 : 1,
-              })}
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.12,
+                shadowRadius: 6,
+                elevation: 2,
+              }}
             >
-              <Text variant="body-em" style={{ color: "#FFFFFF" }}>
+              <Text
+                style={{
+                  color: "#FFFFFF",
+                  fontFamily: "Inter-SemiBold",
+                  fontSize: 15,
+                }}
+              >
                 Authorize
               </Text>
-            </Pressable>
-          </View>
+            </View>
+          </Pressable>
 
           {/* Cancel — outlined pill. */}
-          <View
-            style={{
-              width: "100%",
-              height: 52,
-              borderRadius: 999,
-              borderWidth: 1,
-              borderColor: borderColor,
-              overflow: "hidden",
-            }}
+          <Pressable
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
+            style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
           >
-            <Pressable
-              onPress={onClose}
-              accessibilityRole="button"
-              accessibilityLabel="Cancel"
-              style={({ pressed }) => ({
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
+            <View
+              style={{
+                width: "100%",
+                height: 52,
+                borderRadius: 999,
+                borderWidth: 1,
+                borderColor: borderColor,
                 alignItems: "center",
                 justifyContent: "center",
-                opacity: pressed ? 0.7 : 1,
-              })}
+              }}
             >
-              <Text variant="body-em" style={{ color: inkColor }}>
+              <Text
+                style={{
+                  color: inkColor,
+                  fontFamily: "Inter-SemiBold",
+                  fontSize: 15,
+                }}
+              >
                 Cancel
               </Text>
-            </Pressable>
-          </View>
+            </View>
+          </Pressable>
         </View>
       </Animated.View>
     </View>

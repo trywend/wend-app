@@ -187,68 +187,68 @@ function NoteActionsSheetMounted({
                 marginTop: 4,
               }}
             >
-              {/* Cancel — outlined */}
-              <View
-                style={{
+              {/* Cancel — outlined. Wrapper-View pattern (cssInterop). */}
+              <Pressable
+                onPress={() => setConfirmingDelete(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel"
+                style={({ pressed }) => ({
                   flex: 1,
-                  height: 48,
-                  borderRadius: 12,
-                  borderWidth: 1,
-                  borderColor: borderColor,
-                  overflow: "hidden",
-                }}
+                  opacity: pressed ? 0.7 : 1,
+                })}
               >
-                <Pressable
-                  onPress={() => setConfirmingDelete(false)}
-                  accessibilityRole="button"
-                  accessibilityLabel="Cancel"
-                  style={({ pressed }) => ({
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
+                <View
+                  style={{
+                    height: 48,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: borderColor,
                     alignItems: "center",
                     justifyContent: "center",
-                    opacity: pressed ? 0.7 : 1,
-                  })}
+                  }}
                 >
-                  <Text variant="body-em" style={{ color: inkColor }}>
+                  <Text
+                    style={{
+                      color: inkColor,
+                      fontFamily: "Inter-SemiBold",
+                      fontSize: 15,
+                    }}
+                  >
                     Cancel
                   </Text>
-                </Pressable>
-              </View>
+                </View>
+              </Pressable>
 
-              {/* Delete — destructive fill */}
-              <View
-                style={{
+              {/* Delete — destructive fill. */}
+              <Pressable
+                onPress={handleDeleteConfirm}
+                accessibilityRole="button"
+                accessibilityLabel="Delete"
+                style={({ pressed }) => ({
                   flex: 1,
-                  height: 48,
-                  borderRadius: 12,
-                  backgroundColor: failedColor,
-                  overflow: "hidden",
-                }}
+                  opacity: pressed ? 0.85 : 1,
+                })}
               >
-                <Pressable
-                  onPress={handleDeleteConfirm}
-                  accessibilityRole="button"
-                  accessibilityLabel="Delete"
-                  style={({ pressed }) => ({
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
+                <View
+                  style={{
+                    height: 48,
+                    borderRadius: 12,
+                    backgroundColor: failedColor,
                     alignItems: "center",
                     justifyContent: "center",
-                    opacity: pressed ? 0.85 : 1,
-                  })}
+                  }}
                 >
-                  <Text variant="body-em" style={{ color: "#FFFFFF" }}>
+                  <Text
+                    style={{
+                      color: "#FFFFFF",
+                      fontFamily: "Inter-SemiBold",
+                      fontSize: 15,
+                    }}
+                  >
                     Delete
                   </Text>
-                </Pressable>
-              </View>
+                </View>
+              </Pressable>
             </View>
           </View>
         ) : (
@@ -299,19 +299,28 @@ function ActionRow({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
-      style={({ pressed }) => ({
-        flexDirection: "row",
-        alignItems: "center",
-        paddingHorizontal: 24,
-        paddingVertical: 16,
-        gap: 16,
-        opacity: pressed ? 0.7 : 1,
-      })}
+      style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
     >
-      <Icon size={22} color={iconColor} weight="regular" />
-      <Text variant="body-em" style={{ color: labelColor }}>
-        {label}
-      </Text>
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          paddingHorizontal: 24,
+          paddingVertical: 16,
+        }}
+      >
+        <Icon size={22} color={iconColor} weight="regular" />
+        <Text
+          style={{
+            marginLeft: 14,
+            color: labelColor,
+            fontFamily: "Inter-Medium",
+            fontSize: 16,
+          }}
+        >
+          {label}
+        </Text>
+      </View>
     </Pressable>
   );
 }

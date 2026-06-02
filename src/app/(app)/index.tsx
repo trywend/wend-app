@@ -30,6 +30,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import {
+  Alert,
   Animated as RNAnimated,
   Easing,
   Keyboard,
@@ -1082,6 +1083,11 @@ export default function HomeScreen() {
         onClose={() => setSettingsOpen(false)}
         onSignOut={handleSignOut}
         onOpenIntegrations={() => setIntegrationsOpen(true)}
+        onShowComingSoon={(label) => {
+          // Lightweight feedback for non-functional rows (Profile, Subscription).
+          // Replace with real destinations as they ship.
+          Alert.alert(label, `${label} is coming soon.`);
+        }}
       />
       <IntegrationsSheet
         open={integrationsOpen}

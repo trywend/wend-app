@@ -385,51 +385,44 @@ function IntegrationCard({
             onPress={onConfigure}
             accessibilityRole="button"
             accessibilityLabel={`Configure ${name}`}
-            style={({ pressed }) => ({
-              position: "absolute",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: pressed ? 0.7 : 1,
-            })}
+            style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
           >
-            <Text variant="meta" style={{ color: inkColor }}>
-              Configure
-            </Text>
+            <View
+              style={{
+                paddingHorizontal: 14,
+                paddingVertical: 10,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Text variant="meta" style={{ color: inkColor }}>
+                Configure
+              </Text>
+            </View>
           </Pressable>
         </View>
       ) : (
-        <View
-          style={{
-            height: 40,
-            borderRadius: 10,
-            backgroundColor: accent,
-            overflow: "hidden",
-          }}
+        <Pressable
+          onPress={onConnect}
+          accessibilityRole="button"
+          accessibilityLabel={`Connect ${name}`}
+          style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}
         >
-          <Pressable
-            onPress={onConnect}
-            accessibilityRole="button"
-            accessibilityLabel={`Connect ${name}`}
-            style={({ pressed }) => ({
-              position: "absolute",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
+          <View
+            style={{
+              height: 40,
+              paddingHorizontal: 18,
+              borderRadius: 10,
+              backgroundColor: accent,
               alignItems: "center",
               justifyContent: "center",
-              opacity: pressed ? 0.85 : 1,
-            })}
+            }}
           >
             <Text variant="meta" style={{ color: "#FFFFFF" }}>
               Connect
             </Text>
-          </Pressable>
-        </View>
+          </View>
+        </Pressable>
       )}
     </View>
   );

@@ -334,21 +334,25 @@ function StartView(props: {
             accessibilityRole="button"
             accessibilityLabel="Send code to email"
             style={({ pressed }) => ({
-              width: 44,
-              height: 44,
-              borderRadius: 22,
-              backgroundColor: tokens.pillBg,
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: busy && busyProvider !== "email" ? 0.4 : 1,
-              transform: [{ scale: pressed ? 0.94 : 1 }],
+              opacity: busy && busyProvider !== "email" ? 0.4 : pressed ? 0.85 : 1,
             })}
           >
-            {busyProvider === "email" ? (
-              <ActivityIndicator color={tokens.pillFg} />
-            ) : (
-              <ArrowRightIcon size={18} color={tokens.pillFg} weight="bold" />
-            )}
+            <View
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 22,
+                backgroundColor: tokens.pillBg,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              {busyProvider === "email" ? (
+                <ActivityIndicator color={tokens.pillFg} />
+              ) : (
+                <ArrowRightIcon size={18} color={tokens.pillFg} weight="bold" />
+              )}
+            </View>
           </Pressable>
         </View>
 
@@ -376,71 +380,95 @@ function StartView(props: {
           <View style={{ flex: 1, height: 1, backgroundColor: tokens.borderColor }} />
         </View>
 
-        {/* Google pill */}
+        {/* Google pill — wrapper-View pattern. cssInterop strips bg + flex
+            properties from a Pressable's function-form style, so visual /
+            layout stays on a static inner View. See wend_nativewind_gotcha. */}
         <Pressable
           onPress={onGoogle}
           disabled={busy}
           accessibilityRole="button"
           style={({ pressed }) => ({
-            height: 56,
-            borderRadius: 999,
-            backgroundColor: tokens.pillBg,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "center",
-            opacity: busy && busyProvider !== "google" ? 0.4 : busy ? 0.7 : 1,
-            transform: [{ scale: pressed ? 0.97 : 1 }],
+            opacity:
+              busy && busyProvider !== "google"
+                ? 0.4
+                : busy
+                  ? 0.7
+                  : pressed
+                    ? 0.85
+                    : 1,
           })}
         >
-          {busyProvider === "google" ? (
-            <ActivityIndicator color={tokens.pillFg} />
-          ) : (
-            <GoogleLogoIcon size={20} color={tokens.pillFg} weight="bold" />
-          )}
-          <Text
+          <View
             style={{
-              color: tokens.pillFg,
-              marginLeft: 10,
-              fontFamily: "Inter-SemiBold",
-              fontSize: 16,
+              height: 56,
+              borderRadius: 999,
+              backgroundColor: tokens.pillBg,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
-            Continue with Google
-          </Text>
+            {busyProvider === "google" ? (
+              <ActivityIndicator color={tokens.pillFg} />
+            ) : (
+              <GoogleLogoIcon size={20} color={tokens.pillFg} weight="bold" />
+            )}
+            <Text
+              style={{
+                color: tokens.pillFg,
+                marginLeft: 10,
+                fontFamily: "Inter-SemiBold",
+                fontSize: 16,
+              }}
+            >
+              Continue with Google
+            </Text>
+          </View>
         </Pressable>
 
-        {/* GitHub pill */}
+        {/* GitHub pill — same wrapper-View pattern. */}
         <Pressable
           onPress={onGithub}
           disabled={busy}
           accessibilityRole="button"
           style={({ pressed }) => ({
-            height: 56,
-            borderRadius: 999,
             marginTop: 12,
-            backgroundColor: tokens.pillBg,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "center",
-            opacity: busy && busyProvider !== "github" ? 0.4 : busy ? 0.7 : 1,
-            transform: [{ scale: pressed ? 0.97 : 1 }],
+            opacity:
+              busy && busyProvider !== "github"
+                ? 0.4
+                : busy
+                  ? 0.7
+                  : pressed
+                    ? 0.85
+                    : 1,
           })}
         >
-          {busyProvider === "github" ? (
-            <ActivityIndicator color={tokens.pillFg} />
-          ) : (
-            <GithubLogoIcon size={20} color={tokens.pillFg} weight="bold" />
-          )}
-          <Text
+          <View
             style={{
-              color: tokens.pillFg,
-              marginLeft: 10,
-              fontFamily: "Inter-SemiBold",
-              fontSize: 16,
+              height: 56,
+              borderRadius: 999,
+              backgroundColor: tokens.pillBg,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
             }}
           >
-            Continue with GitHub
-          </Text>
+            {busyProvider === "github" ? (
+              <ActivityIndicator color={tokens.pillFg} />
+            ) : (
+              <GithubLogoIcon size={20} color={tokens.pillFg} weight="bold" />
+            )}
+            <Text
+              style={{
+                color: tokens.pillFg,
+                marginLeft: 10,
+                fontFamily: "Inter-SemiBold",
+                fontSize: 16,
+              }}
+            >
+              Continue with GitHub
+            </Text>
+          </View>
         </Pressable>
 
         {/* Error / config caption */}
@@ -562,17 +590,20 @@ function VerifyView(props: {
           disabled={busy || code.length < 6}
           accessibilityRole="button"
           style={({ pressed }) => ({
-            height: 56,
-            borderRadius: 999,
             marginTop: 16,
-            backgroundColor: tokens.pillBg,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "center",
-            opacity: busy || code.length < 6 ? 0.5 : 1,
-            transform: [{ scale: pressed ? 0.97 : 1 }],
+            opacity: busy || code.length < 6 ? 0.5 : pressed ? 0.85 : 1,
           })}
         >
+          <View
+            style={{
+              height: 56,
+              borderRadius: 999,
+              backgroundColor: tokens.pillBg,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
           {busy ? (
             <ActivityIndicator color={tokens.pillFg} />
           ) : (
@@ -586,6 +617,7 @@ function VerifyView(props: {
               Verify
             </Text>
           )}
+          </View>
         </Pressable>
 
         <View
