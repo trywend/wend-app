@@ -158,26 +158,25 @@ export default function SignInScreen() {
     <View style={{ flex: 1, backgroundColor: canvasBg }}>
       {/* Full-bleed background — abstract paper-and-shapes art behind the
           entire sign-in flow. Sits below SafeAreaView so it covers the
-          status bar and gesture inset edges too.
-
-          Composition tuning: with plain `cover` the default center-crop hid
-          the lower-right shapes off-screen. We render the image at ~115%
-          and offset it so the visible viewport lands roughly center-right
-          of the source — pulls more of the colored shapes into frame and
-          keeps the upper-left negative space from dominating. */}
+          status bar and gesture inset edges too. */}
       <Image
         source={require("../../../assets/images/sign-in-bg.png")}
         resizeMode="cover"
         style={{
           position: "absolute",
-          top: "-8%",
-          left: "-2%",
-          right: "-2%",
-          bottom: "-8%",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          // Nudge the framing: shift the image down + right so the upper-row
+          // shapes pull into view from the top edge and the lower-row shapes
+          // ride higher on the bottom. The 1.08 scale gives ~24px of bleed
+          // on each axis so the translates don't expose empty paper at the
+          // corners.
           transform: [
-            { translateX: 24 },
-            { translateY: 80 },
-            { scale: 0.92 },
+            { scale: 1.08 },
+            { translateX: 22 },
+            { translateY: 40 },
           ],
         }}
       />
