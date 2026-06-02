@@ -33,7 +33,6 @@
 
 import { useMemo, useState } from "react";
 import { Pressable, View, ScrollView, ActivityIndicator } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import {
   Gesture,
   GestureDetector,
@@ -384,58 +383,66 @@ function InboxSheetMounted({
         </ScrollView>
       </Animated.View>
 
-      {/* FAB — circular "+" pinned to the lower-right. Background is
-          hardcoded ember (Paper & Ember `accent.500`) instead of reading
-          tokens["accent-default"] because a previous run reported it
-          rendering invisibly; pinning the literal removes any theme-
-          resolution ambiguity. */}
-      <SafeAreaView
+      {/* FAB — circular "+" pinned to the lower-left.
+          Implementation note: the visible bg + shadow + border live on a
+          static-styled wrapper View. The Pressable is a borderless interaction
+          surface laid over it (absolute-fill). Three earlier attempts that put
+          backgroundColor inside the Pressable's `style={({pressed}) => ({...})}`
+          callback rendered as a white circle on device — NativeWind 4's
+          cssInterop, registered against Pressable, appears to drop or stomp
+          color properties on the function-form style in this Expo SDK 56 /
+          RN 0.85 build (the className-layout-drop gotcha extends to bg color
+          here). Mirroring the working send button in (app)/index.tsx would
+          have been fine too — that one uses a plain positioned View parent
+          (not SafeAreaView) and the same function-style on Pressable works.
+          The difference seems to be the SafeAreaView + nested box-none
+          wrappers interacting badly with the Pressable's callback style. */}
+      <View
         pointerEvents="box-none"
         style={{
           position: "absolute",
-          left: 0,
-          right: 0,
-          bottom: 0,
+          left: 24,
+          bottom: 32,
         }}
       >
         <View
-          pointerEvents="box-none"
           style={{
-            // Bottom-LEFT (not the conventional bottom-right) because in
-            // Expo dev builds the launcher floats a gray gear in the
-            // bottom-right corner and was completely covering our FAB. In
-            // production the launcher won't exist; we'll move this back to
-            // bottom-right at that point.
-            alignItems: "flex-start",
-            paddingLeft: 24,
-            paddingBottom: 32,
+            width: 64,
+            height: 64,
+            borderRadius: 32,
+            backgroundColor: "#D85A3C",
+            borderWidth: 2,
+            borderColor: "#B0432A",
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 10 },
+            shadowOpacity: 0.32,
+            shadowRadius: 18,
+            elevation: 14,
+            alignItems: "center",
+            justifyContent: "center",
+            overflow: "hidden",
           }}
         >
           <Pressable
             onPress={onNewNote}
             accessibilityRole="button"
             accessibilityLabel="New note"
+            android_ripple={{ color: "#B0432A", borderless: false }}
             style={({ pressed }) => ({
-              width: 64,
-              height: 64,
-              borderRadius: 32,
-              backgroundColor: "#D85A3C",
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
               alignItems: "center",
               justifyContent: "center",
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 10 },
-              shadowOpacity: 0.32,
-              shadowRadius: 18,
-              elevation: 14,
-              transform: [{ scale: pressed ? 0.94 : 1 }],
-              borderWidth: 2,
-              borderColor: "#B0432A",
+              opacity: pressed ? 0.85 : 1,
             })}
           >
             <PlusIcon size={28} color="#FFFFFF" weight="bold" />
           </Pressable>
         </View>
-      </SafeAreaView>
+      </View>
     </View>
   );
 }
