@@ -174,9 +174,9 @@ export default function SignInScreen() {
           // on each axis so the translates don't expose empty paper at the
           // corners.
           transform: [
-            { scale: 1.08 },
-            { translateX: 22 },
-            { translateY: 40 },
+            { scale: 1.12 },
+            { translateX: 32 },
+            { translateY: 50 },
           ],
         }}
       />
