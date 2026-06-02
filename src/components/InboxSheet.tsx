@@ -383,7 +383,7 @@ function InboxSheetMounted({
         </ScrollView>
       </Animated.View>
 
-      {/* FAB — circular "+" pinned to the lower-left.
+      {/* FAB — circular "+" pinned to the lower-right.
           Implementation note: the visible bg + shadow + border live on a
           static-styled wrapper View. The Pressable is a borderless interaction
           surface laid over it (absolute-fill). Three earlier attempts that put
@@ -401,7 +401,7 @@ function InboxSheetMounted({
         pointerEvents="box-none"
         style={{
           position: "absolute",
-          left: 24,
+          right: 24,
           bottom: 32,
         }}
       >
