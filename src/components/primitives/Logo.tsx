@@ -1,19 +1,19 @@
 /**
  * Wend — logo mark (React Native / react-native-svg).
  *
- * Geometry matches the canonical V2 export (landing/public/brand/wend_mark.svg):
- * a W built from four diagonals with the ember caret integrated into the right
- * valley. The viewBox carries top headroom (y starts at -44) so the caret tip
- * (drawn up to y=-20) is never clipped.
+ * Geometry matches the canonical V2 board (final_logo.png): a W from four
+ * diagonals with the ember caret as the INTEGRATED tip of the rightmost
+ * upstroke — same angle, contained in the letterform (not a separate slash).
  *
- * The W strokes take `inkColor` (so they theme), the caret stays canonical
- * ember #D85A3C.
+ * Coordinates are in the shared 1024 space used by the app icons. The W
+ * strokes take `inkColor` (so they theme); the caret stays canonical ember.
  */
 import Svg, { Path } from "react-native-svg";
 
-const W_PATH = "M20 30 L60 140 L100 30 L140 140 L180 30";
-const CARET_PATH = "M180 30 L220 -20";
+const W_INK = "M240 280 L380 720 L512 280 L644 720 L742 412";
+const W_CARET = "M742 412 L784 280";
 const EMBER = "#D85A3C";
+const STROKE = 90;
 
 export function WendMark({
   height = 48,
@@ -22,18 +22,18 @@ export function WendMark({
   height?: number;
   inkColor?: string;
 }) {
-  // viewBox is 240 wide × 200 tall → width tracks height at a 1.2 ratio.
-  const width = height * 1.2;
+  // viewBox is 660 wide × 590 tall → width tracks height at ~1.119.
+  const width = height * (660 / 590);
   return (
-    <Svg width={width} height={height} viewBox="0 -44 240 200" fill="none">
+    <Svg width={width} height={height} viewBox="180 215 660 590" fill="none">
       <Path
-        d={W_PATH}
+        d={W_INK}
         stroke={inkColor}
-        strokeWidth={22}
+        strokeWidth={STROKE}
         strokeLinecap="square"
         strokeLinejoin="miter"
       />
-      <Path d={CARET_PATH} stroke={EMBER} strokeWidth={22} strokeLinecap="square" />
+      <Path d={W_CARET} stroke={EMBER} strokeWidth={STROKE} strokeLinecap="square" />
     </Svg>
   );
 }
