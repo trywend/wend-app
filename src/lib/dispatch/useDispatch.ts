@@ -31,21 +31,7 @@ import {
 } from "@/config/env";
 import { useDispatchStore } from "@/store/dispatchSlice";
 import { useDaemonStore } from "@/store/daemonSlice";
-
-/** Resolve which URL+token to use for this dispatch. Paired (via QR scan)
- *  beats env. Returns null when neither source has both fields populated. */
-function resolveDaemonCreds():
-  | { url: string; token: string; isConfigured: true }
-  | { url: string; token: string; isConfigured: false } {
-  const paired = useDaemonStore.getState();
-  if (paired.url && paired.token) {
-    return { url: paired.url, token: paired.token, isConfigured: true };
-  }
-  if (envDaemonConfigured) {
-    return { url: envDaemonUrl, token: envDaemonToken, isConfigured: true };
-  }
-  return { url: "", token: "", isConfigured: false };
-}
+import { useResolvedDaemonURL } from "@/lib/dispatch/useResolvedDaemonURL";
 
 export type DispatchEvent =
   | { type: "text"; text: string }
@@ -103,9 +89,14 @@ export function useDispatch(): UseDispatchResult {
   const [running, setRunning] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Reconciler hook — resolves the live URL from the rendezvous backend
+  // for v2 pairings, falls back to cached / env values. We re-read each
+  // dispatch instead of capturing, so a slice update between renders
+  // (e.g., user re-pairs mid-session) reflects on the next send.
+  const resolved = useResolvedDaemonURL();
+
   const dispatch = useCallback(async (args: DispatchArgs) => {
-    const creds = resolveDaemonCreds();
-    if (!creds.isConfigured) {
+    if (!resolved.isReady) {
       args.onEvent({
         type: "error",
         message:
@@ -114,6 +105,16 @@ export function useDispatch(): UseDispatchResult {
       args.onEvent({ type: "done" });
       return;
     }
+    // Best-effort refresh if the cached URL is stale OR this is a v2
+    // device that hasn't resolved yet. Non-blocking — we fire it and
+    // immediately use the current url; the refreshed value lands in
+    // the slice for the NEXT dispatch. Trading one extra round-trip
+    // (only on the very first call after pairing) for guaranteed
+    // freshness without coupling dispatch latency to the rendezvous.
+    if (resolved.deviceId) {
+      void resolved.refresh();
+    }
+    const creds = { url: resolved.url, token: resolved.token };
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -194,15 +195,9 @@ export function useDispatch(): UseDispatchResult {
     abortRef.current?.abort();
   }, []);
 
-  // Live-subscribe to the paired store so the screen's daemon banner /
-  // dot reacts the instant a QR scan completes. Env-based config doesn't
-  // need a subscription — it's an inlined constant from build time.
-  const pairedUrl = useDaemonStore((s) => s.url);
-  const pairedToken = useDaemonStore((s) => s.token);
-  const isConfigured =
-    (pairedUrl.length > 0 && pairedToken.length > 0) || envDaemonConfigured;
-
-  return { dispatch, running, cancel, isConfigured };
+  // `resolved.isReady` already lives off the same store + env fallback,
+  // so the banner / dot react the instant a QR scan completes.
+  return { dispatch, running, cancel, isConfigured: resolved.isReady };
 }
 
 /* ───── Frame parser ─────────────────────────────────────────────────── */

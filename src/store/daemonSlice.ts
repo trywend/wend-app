@@ -20,14 +20,25 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { zustandStorage } from "./storage";
 
 /**
- * Shape that Wend.app's QR code encodes. Mirrors `PairingPayload.swift`
- * in `~/Desktop/Wend/mac-daemon/Sources/WendApp/`. `v` is the protocol
- * version — bump on the Mac side first, then teach the phone about new
- * fields.
+ * QR payload shape Wend.app encodes. Two versions coexist — mirror of
+ * `PairingPayload.swift` in `~/Desktop/Wend/mac-daemon/Sources/WendApp/`:
+ *
+ *   v1 — direct URL routing. `{v:1, url, token, host, issued}`. The
+ *        phone POSTs straight to `url`. Token authorizes the daemon.
+ *
+ *   v2 — rendezvous routing. `{v:2, deviceId, token, host, issued,
+ *        url?}`. Phone resolves the live URL via
+ *        `GET /api/devices/:deviceId` on the trywend.app backend; same
+ *        token authorizes both the rendezvous fetch and the direct
+ *        daemon call. `url` is an optional hint, used as a fallback if
+ *        the rendezvous is unreachable on first dispatch.
  */
 export interface PairingPayload {
   v: number;
-  url: string;
+  /** v1: required. v2: optional fallback hint. */
+  url?: string;
+  /** v2: required. v1: absent. Cardinal id for rendezvous lookups. */
+  deviceId?: string;
   token: string;
   host: string;
   /** Mac-side timestamp (ms epoch). Surfaces in the UI as "paired N
@@ -36,13 +47,19 @@ export interface PairingPayload {
 }
 
 interface DaemonState {
-  /** Public URL of the user's Mac daemon (Funnel ts.net URL, ngrok, or
-   *  a 127.0.0.1 dev URL). Empty when not paired. */
+  /** Direct URL fallback. With a v2 pairing this is the `urlHint` from
+   *  the QR; with v1 it's the canonical target. Always safe to use as a
+   *  best-effort dispatch target. */
   url: string;
-  /** Bearer token the daemon expects. Empty when not paired. */
+  /** Cardinal device identifier. Set only by v2 pairings. When present,
+   *  the reconciler resolves `url` via the rendezvous backend. */
+  deviceId: string;
+  /** Bearer token. v1: the daemon's secret. v2: the device-scoped
+   *  rendezvous token (which the daemon also accepts). Either way, this
+   *  is what goes in `Authorization: Bearer` for every call. */
   token: string;
   /** Friendly Mac name from `scutil --get ComputerName`. Surfaced as
-   *  "Connected to Agnij's MacBook Pro" in the Settings row. */
+   *  "Paired with Agnij's MacBook Pro" in the Settings row. */
   host: string;
   /** ms epoch when the QR was issued by Wend.app. */
   issuedAt: number;
@@ -54,29 +71,47 @@ interface DaemonState {
   setPaired: (payload: PairingPayload) => void;
   /** Forget the current pairing. Called from Settings "Disconnect Mac". */
   clear: () => void;
+  /** Update the cached URL after a successful rendezvous resolve. The
+   *  v2 path calls this whenever the backend reports a fresh URL.
+   *  Doesn't touch deviceId / token / host. */
+  setResolvedURL: (url: string) => void;
 }
 
 export const useDaemonStore = create<DaemonState>()(
   persist(
     (set) => ({
       url: "",
+      deviceId: "",
       token: "",
       host: "",
       issuedAt: 0,
       pairedAt: 0,
       setPaired: (payload) =>
         set({
-          url: payload.url,
+          url: payload.url ?? "",
+          deviceId: payload.deviceId ?? "",
           token: payload.token,
           host: payload.host,
           issuedAt: payload.issued,
           pairedAt: Date.now(),
         }),
       clear: () =>
-        set({ url: "", token: "", host: "", issuedAt: 0, pairedAt: 0 }),
+        set({
+          url: "",
+          deviceId: "",
+          token: "",
+          host: "",
+          issuedAt: 0,
+          pairedAt: 0,
+        }),
+      setResolvedURL: (url) => set({ url }),
     }),
     {
-      name: "wend.daemon.v1",
+      // v2 bumped — old wend.daemon.v1 was {url, token, host} without
+      // deviceId. The persist middleware will rehydrate misses to
+      // defaults, so existing pairings drop back to v1-direct
+      // (url/token only) until the user re-scans the new v2 QR.
+      name: "wend.daemon.v2",
       storage: createJSONStorage(() => zustandStorage),
     },
   ),
@@ -101,14 +136,11 @@ export function parsePairingString(
     return { ok: false, error: "Pairing payload was not a JSON object." };
   }
   const p = parsed as Partial<PairingPayload>;
-  if (p.v !== 1) {
+  if (p.v !== 1 && p.v !== 2) {
     return {
       ok: false,
-      error: `Unsupported pairing version (got v=${String(p.v)}, need v=1). Update the Wend Mac app.`,
+      error: `Unsupported pairing version (got v=${String(p.v)}). Update the Wend Mac app.`,
     };
-  }
-  if (typeof p.url !== "string" || p.url.length === 0) {
-    return { ok: false, error: "Pairing payload is missing the daemon URL." };
   }
   if (typeof p.token !== "string" || p.token.length === 0) {
     return { ok: false, error: "Pairing payload is missing the token." };
@@ -119,11 +151,33 @@ export function parsePairingString(
   if (typeof p.issued !== "number") {
     return { ok: false, error: "Pairing payload is missing the issued timestamp." };
   }
+
+  if (p.v === 1) {
+    if (typeof p.url !== "string" || p.url.length === 0) {
+      return { ok: false, error: "Pairing payload is missing the daemon URL." };
+    }
+    return {
+      ok: true,
+      payload: {
+        v: 1,
+        url: p.url,
+        token: p.token,
+        host: p.host,
+        issued: p.issued,
+      },
+    };
+  }
+
+  // v2 — deviceId mandatory, url optional hint.
+  if (typeof p.deviceId !== "string" || p.deviceId.length === 0) {
+    return { ok: false, error: "Pairing payload v2 is missing the deviceId." };
+  }
   return {
     ok: true,
     payload: {
-      v: p.v,
-      url: p.url,
+      v: 2,
+      deviceId: p.deviceId,
+      url: typeof p.url === "string" ? p.url : undefined,
       token: p.token,
       host: p.host,
       issued: p.issued,

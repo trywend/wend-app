@@ -147,13 +147,13 @@ export const agentRunStatus = pgEnum("agent_run_status", [
 
 export const agentBackend = pgEnum("agent_backend", ["mac", "cloud"]);
 
-export const deviceKind = pgEnum("device_kind", ["mac"]);
-
-export const devicePairingStatus = pgEnum("device_pairing_status", [
-  "pending",
-  "paired",
-  "revoked",
-]);
+// Devices schema lives in the landing repo (`landing/src/db/schema.ts`)
+// and is served via /api/devices. Phase 1's scaffolded `devices` table +
+// enums (deviceKind, devicePairingStatus) here were never wired to any
+// app code, and the rendezvous flow only needs a thin token-keyed
+// registry — one source of truth lives next to the API that owns it.
+// Re-add a userId column + JWT auth here when devices need to be linked
+// to Clerk users.
 
 export const permissionDecision = pgEnum("permission_decision", [
   "approved",
@@ -226,28 +226,10 @@ export const projects = pgTable(
   (t) => [index("projects_user_id_idx").on(t.userId)],
 );
 
-export const devices = pgTable(
-  "devices",
-  {
-    id: uuid("id")
-      .primaryKey()
-      .default(sql`gen_random_uuid()`),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-    name: text("name").notNull(),
-    kind: deviceKind("kind").notNull().default("mac"),
-    pairingStatus: devicePairingStatus("pairing_status")
-      .notNull()
-      .default("pending"),
-    tailnetId: text("tailnet_id"),
-    lastHeartbeat: timestamp("last_heartbeat", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .default(sql`now()`),
-  },
-  (t) => [index("devices_user_id_idx").on(t.userId)],
-);
+// `devices` lives in landing/src/db/schema.ts and is served by the
+// /api/devices rendezvous endpoints. The app talks to it via HTTP, not
+// directly from this Drizzle client. Re-add a local mirror with a
+// `user_id` FK if/when we add Clerk-bound multi-device features.
 
 export const agentRuns = pgTable(
   "agent_runs",
@@ -306,5 +288,4 @@ export type NewNote = typeof notes.$inferInsert;
 export type NoteBlock = typeof noteBlocks.$inferSelect;
 export type AgentRun = typeof agentRuns.$inferSelect;
 export type Project = typeof projects.$inferSelect;
-export type Device = typeof devices.$inferSelect;
 export type PermissionLog = typeof permissionsLog.$inferSelect;
