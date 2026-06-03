@@ -36,6 +36,7 @@ import {
   CreditCardIcon,
   GithubLogoIcon,
   KanbanIcon,
+  LaptopIcon,
   MoonStarsIcon,
   SignOutIcon,
   UserIcon,
@@ -47,12 +48,15 @@ import { useUser } from "@clerk/clerk-expo";
 import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
 import { useUiStore, type ThemePreference } from "@/store/uiSlice";
+import { useDaemonStore } from "@/store/daemonSlice";
 
 export interface SettingsSheetProps {
   open: boolean;
   onClose: () => void;
   onSignOut: () => void;
   onOpenIntegrations: () => void;
+  /** Opens the camera-based QR scanner for pairing with Wend.app on a Mac. */
+  onConnectMac: () => void;
   /** Optional handler for not-yet-built destinations (Profile, Subscription).
    *  The parent renders a toast / no-op. */
   onShowComingSoon?: (label: string) => void;
@@ -69,6 +73,7 @@ function SettingsSheetMounted({
   onClose,
   onSignOut,
   onOpenIntegrations,
+  onConnectMac,
   onShowComingSoon,
 }: SettingsSheetProps) {
   const { tokens } = useTheme();
@@ -91,6 +96,12 @@ function SettingsSheetMounted({
   const githubLabel = githubConnected
     ? githubAccount?.username ?? user?.primaryEmailAddress?.emailAddress ?? "Connected"
     : null;
+
+  // Mac pairing — live from the daemon slice. When `host` is set the user
+  // has scanned a QR from Wend.app at least once. The subtitle shows the
+  // friendly Mac name; tapping the row opens the scanner again to re-pair.
+  const macHost = useDaemonStore((s) => s.host);
+  const macConnected = macHost.length > 0;
 
   const canvasBg = tokens["surface-canvas"];
   const cardBg = tokens["surface-elevated"];
@@ -284,6 +295,34 @@ function SettingsSheetMounted({
               {/* Accent bar */}
               <View style={{ width: 3, backgroundColor: accent }} />
               <View style={{ flex: 1 }}>
+                {/* Mac — first because it's the core integration. */}
+                <Row
+                  Icon={LaptopIcon}
+                  label="Mac"
+                  subtitle={
+                    macConnected
+                      ? `Paired with ${macHost}`
+                      : "Scan the QR from Wend.app"
+                  }
+                  inkColor={inkColor}
+                  subtleColor={subtleColor}
+                  tertiaryColor={tertiaryColor}
+                  onPress={onConnectMac}
+                  trailing={
+                    macConnected ? (
+                      <StatusPip
+                        label="Paired"
+                        color={tokens["status-done"]}
+                      />
+                    ) : (
+                      <SmallButtonText
+                        label="Connect"
+                        color={accent}
+                      />
+                    )
+                  }
+                />
+                <Divider color={borderColor} />
                 <Row
                   Icon={GithubLogoIcon}
                   label="GitHub"

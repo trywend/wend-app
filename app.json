@@ -35,7 +35,13 @@
           }
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Wend needs camera access to scan the pairing QR code from your Mac."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

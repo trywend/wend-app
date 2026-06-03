@@ -16,10 +16,11 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
-  daemonToken,
-  daemonUrl,
-  isDaemonConfigured,
+  daemonToken as envDaemonToken,
+  daemonUrl as envDaemonUrl,
+  isDaemonConfigured as envDaemonConfigured,
 } from "@/config/env";
+import { useDaemonStore } from "@/store/daemonSlice";
 
 export type DaemonHealthStatus = "ok" | "down" | "unknown" | "unconfigured";
 
@@ -33,8 +34,18 @@ const POLL_INTERVAL_MS = 20_000;
 const REQUEST_TIMEOUT_MS = 4_000;
 
 export function useDaemonHealth(): DaemonHealth {
+  // Live-subscribe to the paired store. When the user scans a QR or
+  // clears the pairing, the new creds + status take effect on the next
+  // render without needing a screen reload.
+  const pairedUrl = useDaemonStore((s) => s.url);
+  const pairedToken = useDaemonStore((s) => s.token);
+  const url0 = pairedUrl || envDaemonUrl;
+  const token0 = pairedToken || envDaemonToken;
+  const isConfigured =
+    (pairedUrl.length > 0 && pairedToken.length > 0) || envDaemonConfigured;
+
   const [status, setStatus] = useState<DaemonHealthStatus>(
-    isDaemonConfigured ? "unknown" : "unconfigured",
+    isConfigured ? "unknown" : "unconfigured",
   );
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
 
@@ -45,7 +56,7 @@ export function useDaemonHealth(): DaemonHealth {
   useEffect(() => {
     mountedRef.current = true;
 
-    if (!isDaemonConfigured) {
+    if (!isConfigured) {
       setStatus("unconfigured");
       return () => {
         mountedRef.current = false;
@@ -61,11 +72,11 @@ export function useDaemonHealth(): DaemonHealth {
       // Use /health (lightweight ~80-byte JSON). Older daemon revs only had
       // /index (full project list payload); if /health 404s we fall back so
       // health-checks don't lie about a perfectly-working daemon.
-      const healthUrl = `${daemonUrl.replace(/\/$/, "")}/health?t=${encodeURIComponent(
-        daemonToken,
+      const healthUrl = `${url0.replace(/\/$/, "")}/health?t=${encodeURIComponent(
+        token0,
       )}`;
-      const indexUrl = `${daemonUrl.replace(/\/$/, "")}/index?t=${encodeURIComponent(
-        daemonToken,
+      const indexUrl = `${url0.replace(/\/$/, "")}/index?t=${encodeURIComponent(
+        token0,
       )}`;
       const url = healthUrl;
       try {
@@ -93,7 +104,9 @@ export function useDaemonHealth(): DaemonHealth {
       mountedRef.current = false;
       clearInterval(interval);
     };
-  }, []);
+    // Re-run the poller setup when the paired creds change so a fresh
+    // QR scan starts pinging the new daemon URL immediately.
+  }, [isConfigured, url0, token0]);
 
   return { status, lastCheckedAt };
 }

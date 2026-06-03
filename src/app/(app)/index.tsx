@@ -81,6 +81,7 @@ import { InboxSheet } from "@/components/InboxSheet";
 import { SettingsSheet } from "@/components/SettingsSheet";
 import { IntegrationsSheet } from "@/components/IntegrationsSheet";
 import { ConnectGitHubSheet } from "@/components/ConnectGitHubSheet";
+import { ConnectMacSheet } from "@/components/ConnectMacSheet";
 import { NoteActionsSheet } from "@/components/NoteActionsSheet";
 import { HealthDot } from "@/components/HealthDot";
 import {
@@ -145,6 +146,7 @@ export default function HomeScreen() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [integrationsOpen, setIntegrationsOpen] = useState(false);
   const [connectGitHubOpen, setConnectGitHubOpen] = useState(false);
+  const [connectMacOpen, setConnectMacOpen] = useState(false);
   const [noteActions, setNoteActions] = useState<{
     id: string;
     title: string;
@@ -1099,6 +1101,13 @@ export default function HomeScreen() {
         onClose={() => setSettingsOpen(false)}
         onSignOut={handleSignOut}
         onOpenIntegrations={() => setIntegrationsOpen(true)}
+        onConnectMac={() => {
+          // Open the QR scanner. Don't close settings — the scanner stacks
+          // on top via its higher zIndex, and on success it auto-closes
+          // itself, leaving the user back on Settings with the "Paired with
+          // <host>" subtitle updated live.
+          setConnectMacOpen(true);
+        }}
         onShowComingSoon={(label) => {
           // Lightweight feedback for non-functional rows (Profile, Subscription).
           // Replace with real destinations as they ship.
@@ -1118,6 +1127,10 @@ export default function HomeScreen() {
           console.log("[wend] GitHub authorize tapped");
           setConnectGitHubOpen(false);
         }}
+      />
+      <ConnectMacSheet
+        open={connectMacOpen}
+        onClose={() => setConnectMacOpen(false)}
       />
 
       {/* Command palette — full-screen search overlay. */}

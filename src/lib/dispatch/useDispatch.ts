@@ -25,11 +25,27 @@ import { fetch as expoFetch } from "expo/fetch";
 
 import {
   daemonCwd,
-  daemonToken,
-  daemonUrl,
-  isDaemonConfigured,
+  daemonToken as envDaemonToken,
+  daemonUrl as envDaemonUrl,
+  isDaemonConfigured as envDaemonConfigured,
 } from "@/config/env";
 import { useDispatchStore } from "@/store/dispatchSlice";
+import { useDaemonStore } from "@/store/daemonSlice";
+
+/** Resolve which URL+token to use for this dispatch. Paired (via QR scan)
+ *  beats env. Returns null when neither source has both fields populated. */
+function resolveDaemonCreds():
+  | { url: string; token: string; isConfigured: true }
+  | { url: string; token: string; isConfigured: false } {
+  const paired = useDaemonStore.getState();
+  if (paired.url && paired.token) {
+    return { url: paired.url, token: paired.token, isConfigured: true };
+  }
+  if (envDaemonConfigured) {
+    return { url: envDaemonUrl, token: envDaemonToken, isConfigured: true };
+  }
+  return { url: "", token: "", isConfigured: false };
+}
 
 export type DispatchEvent =
   | { type: "text"; text: string }
@@ -88,11 +104,12 @@ export function useDispatch(): UseDispatchResult {
   const abortRef = useRef<AbortController | null>(null);
 
   const dispatch = useCallback(async (args: DispatchArgs) => {
-    if (!isDaemonConfigured) {
+    const creds = resolveDaemonCreds();
+    if (!creds.isConfigured) {
       args.onEvent({
         type: "error",
         message:
-          "Daemon URL or token missing — set EXPO_PUBLIC_DAEMON_URL and EXPO_PUBLIC_DAEMON_TOKEN in .env.local.",
+          "No Mac paired — open Settings → Connectivity → Mac and scan the QR from Wend.app.",
       });
       args.onEvent({ type: "done" });
       return;
@@ -112,8 +129,8 @@ export function useDispatch(): UseDispatchResult {
     // un-configured daemon shouldn't flip the pip on at all.
     useDispatchStore.getState().setRunningNoteId(args.noteId ?? null);
     try {
-      const url = `${daemonUrl.replace(/\/$/, "")}/run?t=${encodeURIComponent(
-        daemonToken,
+      const url = `${creds.url.replace(/\/$/, "")}/run?t=${encodeURIComponent(
+        creds.token,
       )}`;
       const res = await expoFetch(url, {
         method: "POST",
@@ -177,7 +194,15 @@ export function useDispatch(): UseDispatchResult {
     abortRef.current?.abort();
   }, []);
 
-  return { dispatch, running, cancel, isConfigured: isDaemonConfigured };
+  // Live-subscribe to the paired store so the screen's daemon banner /
+  // dot reacts the instant a QR scan completes. Env-based config doesn't
+  // need a subscription — it's an inlined constant from build time.
+  const pairedUrl = useDaemonStore((s) => s.url);
+  const pairedToken = useDaemonStore((s) => s.token);
+  const isConfigured =
+    (pairedUrl.length > 0 && pairedToken.length > 0) || envDaemonConfigured;
+
+  return { dispatch, running, cancel, isConfigured };
 }
 
 /* ───── Frame parser ─────────────────────────────────────────────────── */
