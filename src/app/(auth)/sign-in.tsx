@@ -37,6 +37,7 @@ import {
 } from "phosphor-react-native";
 
 import { Text } from "@/components/primitives";
+import { WendMark } from "@/components/primitives/Logo";
 import {
   useGoogleSignIn,
   useGithubSignIn,
@@ -254,7 +255,7 @@ function StartView(props: {
   clerkOk: boolean;
 }) {
   const { tokens, email, setEmail, onSendCode, onGoogle, onGithub, busy, busyProvider, error, clerkOk } = props;
-  const accent = "#C25A3B"; // ember — could also pull from tokens.accent
+  const accent = "#D85A3C"; // canonical ember (matches theme accent-default)
 
   // Dark ink color used by the OAuth pills + email send button. The design
   // calls for the on-background token (#1d1b19) so the buttons feel like
@@ -269,23 +270,14 @@ function StartView(props: {
           phones, balanced against the auth actions pinned to the bottom. */}
       <View style={{ flex: 1 }} />
 
-      {/* Hero — small ember W mark + 2-line headline + WEND IT. caption. */}
+      {/* Hero — the Wend mark + 2-line headline + WEND IT. caption. */}
       <Animated.View
         entering={FadeInDown.duration(700)}
         style={{ alignItems: "center" }}
       >
-        <Text
-          style={{
-            fontFamily: "JetBrainsMono-Medium",
-            fontSize: 36,
-            lineHeight: 36,
-            color: accent,
-            marginBottom: 20,
-            letterSpacing: -1,
-          }}
-        >
-          W
-        </Text>
+        <View style={{ marginBottom: 22 }}>
+          <WendMark height={48} inkColor={tokens.inkColor} />
+        </View>
 
         <Text
           style={{
@@ -297,7 +289,7 @@ function StartView(props: {
             letterSpacing: -0.6,
           }}
         >
-          Notes you can
+          Notes that
         </Text>
         <Text
           style={{
@@ -309,7 +301,7 @@ function StartView(props: {
             letterSpacing: -0.6,
           }}
         >
-          send.
+          act.
         </Text>
         <Text
           style={{
@@ -573,7 +565,7 @@ function VerifyView(props: {
   codeInputRef: React.RefObject<TextInput | null>;
 }) {
   const { tokens, email, code, setCode, onVerify, onResend, onBack, busy, error, emailMode, codeInputRef } = props;
-  const accent = "#C25A3B";
+  const accent = "#D85A3C";
 
   return (
     <>

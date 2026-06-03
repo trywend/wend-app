@@ -709,7 +709,7 @@ export default function HomeScreen() {
                 multiline
                 caretHidden={showCaretOverlay}
                 textAlignVertical="top"
-                placeholder={hasContent ? "Start typing..." : ""}
+                placeholder={hasContent ? "Write a thought..." : ""}
                 placeholderTextColor={placeholderColor}
                 selectionColor={tokens["accent-caret"]}
                 onFocus={() => setBodyFocused(true)}

@@ -87,7 +87,7 @@ export function FirstNoteCoachmark() {
             textAlign: "center",
           }}
         >
-          Tap send to dispatch.
+          Tap send. The note does the work.
         </Text>
       </View>
       {/* Arrow pointing down to the button — a rotated square that picks up
