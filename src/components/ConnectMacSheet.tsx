@@ -33,6 +33,7 @@ import {
   useCameraPermissions,
   type BarcodeScanningResult,
 } from "expo-camera";
+import { useAuth } from "@clerk/clerk-expo";
 import Animated, {
   FadeIn,
   FadeOut,
@@ -55,12 +56,139 @@ import {
   useDaemonStore,
 } from "@/store/daemonSlice";
 
+/** Rendezvous backend base URL — same constant the resolver hook uses.
+ *  Kept inline (instead of imported) because the resolver file already
+ *  reads the same env var; duplication is cheaper than introducing a
+ *  shared constants module just for one string. */
+const RENDEZVOUS_BASE =
+  process.env.EXPO_PUBLIC_RENDEZVOUS_BASE ||
+  "https://wend-landing.vercel.app";
+
+/** POST /api/devices/:id/adopt — binds the device to the signed-in
+ *  user. Returns null on success, or a user-facing error string. The
+ *  device-side state on the phone (URL, token) is already persisted by
+ *  the time this fires, so a failure here is recoverable — the user
+ *  can retry the adopt from a Settings affordance later (which is the
+ *  follow-up turn). */
+async function adoptDevice(
+  deviceId: string,
+  deviceToken: string,
+  getToken: () => Promise<string | null>,
+): Promise<string | null> {
+  let jwt: string | null = null;
+  try {
+    jwt = await getToken();
+  } catch {
+    return "Couldn't get your Clerk session — try signing out and back in.";
+  }
+  if (!jwt) {
+    return "You need to be signed in to adopt this Mac.";
+  }
+  const url = `${RENDEZVOUS_BASE.replace(/\/$/, "")}/api/devices/${encodeURIComponent(deviceId)}/adopt`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${jwt}`,
+      },
+      body: JSON.stringify({ deviceToken }),
+    });
+    if (res.ok) return null;
+    if (res.status === 409) {
+      return "This Mac is already paired to another account.";
+    }
+    if (res.status === 404) {
+      // Token wrong or device unknown — same status code by design.
+      return "Couldn't find this Mac. The QR may have expired; ask Wend.app to regenerate it.";
+    }
+    if (res.status === 401) {
+      return "Your sign-in session is expired. Sign out and back in.";
+    }
+    return `Adoption failed (HTTP ${res.status}).`;
+  } catch {
+    return "Network error reaching trywend.app. You can retry from Settings.";
+  }
+}
+
+/** POST /api/devices/by-code — redeem the 6-digit OTP shown on the
+ *  Mac. Returns { id, token, host, currentUrl } on success which the
+ *  caller can plug into the daemon slice exactly like a v2 QR scan
+ *  (and the row is auto-adopted server-side, so no extra adopt call).
+ *  Returns { error } on failure. */
+interface RedeemSuccess {
+  ok: true;
+  id: string;
+  token: string;
+  host: string;
+  currentUrl: string | null;
+}
+interface RedeemFailure { ok: false; error: string }
+async function redeemCode(
+  code: string,
+  getToken: () => Promise<string | null>,
+): Promise<RedeemSuccess | RedeemFailure> {
+  let jwt: string | null = null;
+  try {
+    jwt = await getToken();
+  } catch {
+    return { ok: false, error: "Couldn't get your Clerk session." };
+  }
+  if (!jwt) {
+    return { ok: false, error: "You need to be signed in to pair a Mac." };
+  }
+  const url = `${RENDEZVOUS_BASE.replace(/\/$/, "")}/api/devices/by-code`;
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${jwt}`,
+      },
+      body: JSON.stringify({ code }),
+    });
+    if (res.status === 404) {
+      return { ok: false, error: "That code isn't valid or has expired. Ask Wend.app for a new one." };
+    }
+    if (res.status === 409) {
+      return { ok: false, error: "This Mac is already paired to another account." };
+    }
+    if (res.status === 401) {
+      return { ok: false, error: "Your sign-in session is expired. Sign out and back in." };
+    }
+    if (!res.ok) {
+      return { ok: false, error: `Pairing failed (HTTP ${res.status}).` };
+    }
+    const body = (await res.json()) as {
+      id?: string;
+      token?: string;
+      host?: string;
+      currentUrl?: string | null;
+    };
+    if (!body.id || !body.token || typeof body.host !== "string") {
+      return { ok: false, error: "Server returned an unexpected response." };
+    }
+    return {
+      ok: true,
+      id: body.id,
+      token: body.token,
+      host: body.host,
+      currentUrl: body.currentUrl ?? null,
+    };
+  } catch {
+    return {
+      ok: false,
+      error: "Network error reaching trywend.app. You can retry from Settings.",
+    };
+  }
+}
+
 interface ConnectMacSheetProps {
   open: boolean;
   onClose: () => void;
 }
 
-type Mode = "scanning" | "success" | "error" | "manual";
+type Mode = "scanning" | "code" | "success" | "error" | "manual";
 
 export function ConnectMacSheet(
   props: ConnectMacSheetProps,
@@ -80,6 +208,10 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
    *  fire the handler twice and double-write the store. Released on
    *  error or re-mount. */
   const lockRef = useRef(false);
+  /** Clerk session — used to mint a JWT for the adopt call below. The
+   *  device row gets bound to the signed-in user the moment the phone
+   *  finishes parsing the QR. */
+  const { getToken, isSignedIn } = useAuth();
 
   // Request permission on mount if undecided. Don't auto-request again
   // if the user explicitly denied — they can tap "Open Settings" in the
@@ -108,7 +240,7 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
     finalize(result.data);
   }
 
-  function finalize(raw: string) {
+  async function finalize(raw: string) {
     const parsed = parsePairingString(raw);
     if (!parsed.ok) {
       setErrorMsg(parsed.error);
@@ -116,8 +248,35 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
       // Keep the lock — explicit "Scan again" releases it.
       return;
     }
+    // Persist locally first so future dispatches work even if adopt
+    // fails (network blip, backend cold start, etc.). The Mac can still
+    // be talked to directly via the embedded URL / hint.
     useDaemonStore.getState().setPaired(parsed.payload);
     setPairedHost(parsed.payload.host);
+
+    // Bind the device to the signed-in user. v2 payloads carry a
+    // deviceId we can address; v1 payloads predate the rendezvous and
+    // can't be adopted — those still work for direct dispatch but
+    // won't appear in "your Macs". When the user upgrades the Mac app,
+    // they re-scan a v2 QR and adoption takes over.
+    if (parsed.payload.v === 2 && parsed.payload.deviceId && isSignedIn) {
+      const adoptError = await adoptDevice(
+        parsed.payload.deviceId,
+        parsed.payload.token,
+        getToken,
+      );
+      if (adoptError) {
+        // Pairing locally succeeded, but ownership-binding didn't.
+        // Surface as an error AFTER persisting so the user can still
+        // dispatch — they'll see "couldn't bind to your account; you
+        // can retry from Settings" and the Mac shows up in dispatch
+        // but not in the device list.
+        setErrorMsg(adoptError);
+        setMode("error");
+        return;
+      }
+    }
+
     setMode("success");
     // Auto-close so the user lands back on Settings with the "Connected
     // to <host>" subtitle.
@@ -285,6 +444,10 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
             <ScanView
               onScan={handleScan}
               onOpenManual={() => setMode("manual")}
+              onOpenCode={() => {
+                setManualText("");
+                setMode("code");
+              }}
               ink={ink}
               subtle={subtle}
               border={border}
@@ -300,6 +463,34 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
                 setManualText("");
                 setMode("manual");
               }}
+              ink={ink}
+              subtle={subtle}
+              border={border}
+              accent={accent}
+              accentOn={accentOn}
+            />
+          ) : mode === "code" ? (
+            <CodeView
+              onSubmit={async (digits) => {
+                const out = await redeemCode(digits, getToken);
+                if (!out.ok) {
+                  setErrorMsg(out.error);
+                  setMode("error");
+                  return;
+                }
+                useDaemonStore.getState().setPaired({
+                  v: 2,
+                  deviceId: out.id,
+                  token: out.token,
+                  host: out.host,
+                  url: out.currentUrl ?? undefined,
+                  issued: Date.now(),
+                });
+                setPairedHost(out.host);
+                setMode("success");
+                setTimeout(onClose, 1400);
+              }}
+              onCancel={() => setMode("scanning")}
               ink={ink}
               subtle={subtle}
               border={border}
@@ -331,12 +522,13 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
 function ScanView(props: {
   onScan: (r: BarcodeScanningResult) => void;
   onOpenManual: () => void;
+  onOpenCode: () => void;
   ink: string;
   subtle: string;
   border: string;
   accent: string;
 }) {
-  const { onScan, onOpenManual, ink, subtle, border, accent } = props;
+  const { onScan, onOpenManual, onOpenCode, ink, subtle, border, accent } = props;
   return (
     <>
       <View
@@ -393,41 +585,222 @@ function ScanView(props: {
         </View>
       </View>
 
-      <Pressable
-        onPress={onOpenManual}
-        accessibilityRole="button"
-        accessibilityLabel="Paste pairing JSON manually"
-        style={({ pressed }) => ({
-          marginTop: 14,
-          opacity: pressed ? 0.6 : 1,
-        })}
-      >
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "center",
-            paddingVertical: 12,
-            borderRadius: 12,
-            borderWidth: 1,
-            borderColor: border,
-          }}
+      {/* Fallback affordances — both alts to the QR. "Type code" is
+          the preferred alt (one tap → small input); "paste JSON" is
+          the power-user escape hatch. */}
+      <View style={{ marginTop: 14, flexDirection: "row", gap: 10 }}>
+        <Pressable
+          onPress={onOpenCode}
+          accessibilityRole="button"
+          accessibilityLabel="Type pairing code instead"
+          style={({ pressed }) => ({ flex: 1, opacity: pressed ? 0.6 : 1 })}
         >
-          <QrCodeIcon size={16} color={subtle} weight="regular" />
-          <Text
+          <View
             style={{
-              marginLeft: 8,
-              fontFamily: "Inter-Medium",
-              fontSize: 13,
-              color: ink,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              paddingVertical: 12,
+              borderRadius: 12,
+              backgroundColor: accent,
             }}
           >
-            Paste pairing JSON instead
-          </Text>
-        </View>
-      </Pressable>
+            <Text
+              style={{
+                fontFamily: "Inter-SemiBold",
+                fontSize: 13,
+                color: "#FFFFFF",
+              }}
+            >
+              Type code instead
+            </Text>
+          </View>
+        </Pressable>
+        <Pressable
+          onPress={onOpenManual}
+          accessibilityRole="button"
+          accessibilityLabel="Paste pairing JSON manually"
+          style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+        >
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: border,
+            }}
+          >
+            <QrCodeIcon size={14} color={subtle} weight="regular" />
+            <Text
+              style={{
+                marginLeft: 6,
+                fontFamily: "Inter-Medium",
+                fontSize: 12,
+                color: ink,
+              }}
+            >
+              JSON
+            </Text>
+          </View>
+        </Pressable>
+      </View>
     </>
   );
+}
+
+/* ─── OTP entry view ────────────────────────────────────────────────── */
+
+function CodeView(props: {
+  onSubmit: (digits: string) => void;
+  onCancel: () => void;
+  ink: string;
+  subtle: string;
+  border: string;
+  accent: string;
+  accentOn: string;
+}) {
+  const [code, setCode] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const inputRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    // Auto-focus after the sheet's slide animation finishes.
+    const t = setTimeout(() => inputRef.current?.focus(), 260);
+    return () => clearTimeout(t);
+  }, []);
+
+  const digits = code.replace(/\D/g, "").slice(0, 6);
+  const ready = digits.length === 6;
+
+  async function go() {
+    if (!ready || submitting) return;
+    setSubmitting(true);
+    await props.onSubmit(digits);
+    setSubmitting(false);
+  }
+
+  return (
+    <Centered>
+      <Text
+        style={{
+          fontFamily: "Inter-SemiBold",
+          fontSize: 18,
+          color: props.ink,
+          marginBottom: 6,
+        }}
+      >
+        Type the 6-digit code
+      </Text>
+      <Text
+        style={{
+          fontFamily: "Inter-Regular",
+          fontSize: 13,
+          color: props.subtle,
+          textAlign: "center",
+          marginBottom: 24,
+          paddingHorizontal: 20,
+          lineHeight: 18,
+        }}
+      >
+        Open Wend.app on your Mac and look under the QR code.
+      </Text>
+      <TextInput
+        ref={inputRef}
+        value={formatOTP(digits)}
+        onChangeText={(t) => setCode(t)}
+        keyboardType="number-pad"
+        returnKeyType="go"
+        onSubmitEditing={go}
+        maxLength={7 /* 6 digits + 1 space */}
+        editable={!submitting}
+        style={{
+          width: 220,
+          height: 60,
+          borderWidth: 1,
+          borderColor: ready ? props.accent : props.border,
+          borderRadius: 14,
+          textAlign: "center",
+          fontSize: 26,
+          letterSpacing: 6,
+          color: props.ink,
+          fontFamily: "JetBrainsMono-Medium",
+        }}
+      />
+      <View style={{ marginTop: 22, flexDirection: "row", gap: 10 }}>
+        <Pressable
+          onPress={props.onCancel}
+          disabled={submitting}
+          accessibilityRole="button"
+          accessibilityLabel="Back to scanner"
+          style={({ pressed }) => ({
+            opacity: submitting ? 0.4 : pressed ? 0.6 : 1,
+          })}
+        >
+          <View
+            style={{
+              height: 44,
+              paddingHorizontal: 18,
+              borderRadius: 22,
+              borderWidth: 1,
+              borderColor: props.border,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text
+              style={{
+                fontFamily: "Inter-SemiBold",
+                fontSize: 14,
+                color: props.ink,
+              }}
+            >
+              Cancel
+            </Text>
+          </View>
+        </Pressable>
+        <Pressable
+          onPress={go}
+          disabled={!ready || submitting}
+          accessibilityRole="button"
+          accessibilityLabel="Pair"
+          style={({ pressed }) => ({
+            opacity: !ready ? 0.4 : submitting ? 0.6 : pressed ? 0.85 : 1,
+          })}
+        >
+          <View
+            style={{
+              height: 44,
+              paddingHorizontal: 28,
+              borderRadius: 22,
+              backgroundColor: props.accent,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Text
+              style={{
+                fontFamily: "Inter-SemiBold",
+                fontSize: 14,
+                color: props.accentOn,
+              }}
+            >
+              {submitting ? "Pairing…" : "Pair"}
+            </Text>
+          </View>
+        </Pressable>
+      </View>
+    </Centered>
+  );
+}
+
+/** Format "123456" → "123 456" with a thin space for visual rhythm. */
+function formatOTP(digits: string): string {
+  if (digits.length <= 3) return digits;
+  return digits.slice(0, 3) + " " + digits.slice(3);
 }
 
 function DeniedView(props: {

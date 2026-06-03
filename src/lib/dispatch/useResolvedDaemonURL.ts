@@ -32,9 +32,11 @@ import {
   daemonToken as envDaemonToken,
 } from "@/config/env";
 
-/** Where trywend.app/api/devices lives. Override via env for local dev. */
+/** Production rendezvous backend (Vercel deployment of the landing).
+ *  Override via EXPO_PUBLIC_RENDEZVOUS_BASE for local dev. */
 const RENDEZVOUS_BASE =
-  process.env.EXPO_PUBLIC_RENDEZVOUS_BASE || "https://trywend.app";
+  process.env.EXPO_PUBLIC_RENDEZVOUS_BASE ||
+  "https://wend-landing.vercel.app";
 const RESOLVE_TIMEOUT_MS = 4_000;
 /** A resolved URL is considered fresh for this long before we'd re-fetch
  *  on the next dispatch. Cheap fetch — the cache is just to avoid one
