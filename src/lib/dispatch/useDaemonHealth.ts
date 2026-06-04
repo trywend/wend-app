@@ -15,12 +15,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 
-import {
-  daemonToken as envDaemonToken,
-  daemonUrl as envDaemonUrl,
-  isDaemonConfigured as envDaemonConfigured,
-} from "@/config/env";
-import { useDaemonStore } from "@/store/daemonSlice";
+import { useResolvedDaemonURL } from "@/lib/dispatch/useResolvedDaemonURL";
 
 export type DaemonHealthStatus = "ok" | "down" | "unknown" | "unconfigured";
 
@@ -34,15 +29,16 @@ const POLL_INTERVAL_MS = 20_000;
 const REQUEST_TIMEOUT_MS = 4_000;
 
 export function useDaemonHealth(): DaemonHealth {
-  // Live-subscribe to the paired store. When the user scans a QR or
-  // clears the pairing, the new creds + status take effect on the next
-  // render without needing a screen reload.
-  const pairedUrl = useDaemonStore((s) => s.url);
-  const pairedToken = useDaemonStore((s) => s.token);
-  const url0 = pairedUrl || envDaemonUrl;
-  const token0 = pairedToken || envDaemonToken;
-  const isConfigured =
-    (pairedUrl.length > 0 && pairedToken.length > 0) || envDaemonConfigured;
+  // Route health checks through the same resolver `useDispatch` uses,
+  // NOT through the raw daemonSlice.url. For v2 pairings the stored
+  // `url` is just a hint captured at QR-scan time; the LIVE URL flows
+  // through the rendezvous backend and updates every time the Mac's
+  // tunnel rotates. Pinging the stale hint kept the dot red across
+  // every Mac restart even though the daemon was perfectly healthy.
+  const resolved = useResolvedDaemonURL();
+  const url0 = resolved.url;
+  const token0 = resolved.token;
+  const isConfigured = resolved.isReady;
 
   const [status, setStatus] = useState<DaemonHealthStatus>(
     isConfigured ? "unknown" : "unconfigured",
