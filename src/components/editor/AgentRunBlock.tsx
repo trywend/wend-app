@@ -81,6 +81,9 @@ export interface AgentRunBlockProps {
   projectName?: string | null;
   /** Re-run the failed prompt. */
   onRetry?: () => void;
+  /** Called when the user taps a file path in the markdown response. The
+   *  parent screen owns the FileViewerModal state and shows it on demand. */
+  onOpenFile?: (path: string) => void;
 }
 
 export function AgentRunBlock({
@@ -88,6 +91,7 @@ export function AgentRunBlock({
   onStop,
   projectName,
   onRetry,
+  onOpenFile,
 }: AgentRunBlockProps) {
   const { tokens } = useTheme();
   const running = state.status === "running";
@@ -104,14 +108,16 @@ export function AgentRunBlock({
     [state.response],
   );
 
-  // Body fold state. Running always expanded. Done starts expanded — user can
-  // tap to collapse. Error stays expanded so the message is visible.
-  const [bodyOpen, setBodyOpen] = useState(true);
+  // Body fold state. Done starts COLLAPSED — long conversations stay
+  // skimmable, the user taps to expand. Running and error force-open below.
+  const [bodyOpen, setBodyOpen] = useState(false);
   // Tool drawer fold state. Closed by default to keep the body the focus.
   const [toolsOpen, setToolsOpen] = useState(false);
 
-  // While streaming, force-open so users see new text appearing.
-  const showBody = running || bodyOpen;
+  // Running: force-open so streaming text is visible.
+  // Error: force-open so the error message + retry are visible.
+  // Done: respect the user's tap state (collapsed by default).
+  const showBody = running || errored || bodyOpen;
 
   /* ─── Header spinner ──────────────────────────────────────────────── */
   const rotation = useSharedValue(0);
@@ -310,7 +316,7 @@ export function AgentRunBlock({
       </Pressable>
 
       {/* ─── Collapsed summary line (done && !bodyOpen) ───────────────── */}
-      {done && !bodyOpen && summary.length > 0 ? (
+      {done && !bodyOpen && (summary.length > 0 || hasTools) ? (
         <Animated.View entering={FadeIn.duration(160)}>
           <View
             style={{
@@ -318,18 +324,33 @@ export function AgentRunBlock({
               paddingVertical: 12,
             }}
           >
-            <Text
-              numberOfLines={2}
-              style={{
-                fontFamily: "Inter-Regular",
-                fontSize: 13.5,
-                lineHeight: 20,
-                color: subtle,
-                letterSpacing: -0.1,
-              }}
-            >
-              {summary}
-            </Text>
+            {summary.length > 0 ? (
+              <Text
+                numberOfLines={2}
+                style={{
+                  fontFamily: "Inter-Regular",
+                  fontSize: 13.5,
+                  lineHeight: 20,
+                  color: subtle,
+                  letterSpacing: -0.1,
+                }}
+              >
+                {summary}
+              </Text>
+            ) : null}
+            {hasTools ? (
+              <Text
+                style={{
+                  marginTop: summary.length > 0 ? 6 : 0,
+                  fontFamily: "Inter-Medium",
+                  fontSize: 11.5,
+                  color: tertiary,
+                  letterSpacing: -0.1,
+                }}
+              >
+                {`+${calls.length} ${calls.length === 1 ? "tool" : "tools"}`}
+              </Text>
+            ) : null}
           </View>
         </Animated.View>
       ) : null}
@@ -348,7 +369,6 @@ export function AgentRunBlock({
               tertiary={tertiary}
               border={border}
               accent={accent}
-              chipBg={tokens["surface-chip"]}
             />
           ) : null}
 
@@ -361,7 +381,11 @@ export function AgentRunBlock({
                 paddingBottom: errored || (done && state.costUsd === 0 && state.durationMs === 0) ? 14 : 6,
               }}
             >
-              <Markdown blocks={blocks} />
+              {/* onOpenFile is threaded for the upcoming clickable-file-paths
+               *  work in Markdown.tsx (owned by another agent). Suppress
+               *  until they land the prop on MarkdownProps. */}
+              {/* @ts-expect-error — Markdown.onOpenFile lands in a sibling PR */}
+              <Markdown blocks={blocks} onOpenFile={onOpenFile} />
               {running ? (
                 <RNAnimated.Text
                   style={{
@@ -463,7 +487,6 @@ function ToolDrawer({
   tertiary,
   border,
   accent,
-  chipBg,
 }: {
   calls: ToolCall[];
   open: boolean;
@@ -473,11 +496,7 @@ function ToolDrawer({
   tertiary: string;
   border: string;
   accent: string;
-  chipBg: string;
 }) {
-  const preview = calls.slice(0, 4).map((c) => c.name);
-  const overflow = calls.length - preview.length;
-
   return (
     <View
       style={{
@@ -508,54 +527,12 @@ function ToolDrawer({
             letterSpacing: -0.1,
           }}
         >
-          {calls.length} {calls.length === 1 ? "tool" : "tools"}
+          {`Tools (${calls.length})`}
         </Text>
-        {!open ? (
-          <View
-            style={{
-              flex: 1,
-              flexDirection: "row",
-              flexWrap: "wrap",
-              gap: 4,
-              alignItems: "center",
-            }}
-          >
-            {preview.map((name, i) => (
-              <View
-                key={`${name}-${i}`}
-                style={{
-                  paddingHorizontal: 7,
-                  paddingVertical: 1,
-                  borderRadius: 999,
-                  backgroundColor: chipBg,
-                }}
-              >
-                <Text
-                  style={{
-                    fontFamily: "JetBrainsMono-Medium",
-                    fontSize: 10.5,
-                    color: subtle,
-                  }}
-                >
-                  {name}
-                </Text>
-              </View>
-            ))}
-            {overflow > 0 ? (
-              <Text
-                style={{
-                  fontFamily: "Inter-Medium",
-                  fontSize: 11,
-                  color: tertiary,
-                }}
-              >
-                +{overflow}
-              </Text>
-            ) : null}
-          </View>
-        ) : (
-          <View style={{ flex: 1 }} />
-        )}
+        {/* Spacer — chips removed: when this drawer is closed we keep the
+         *  header minimal, the outer collapsed summary already shows the
+         *  "+N tools" hint. */}
+        <View style={{ flex: 1 }} />
         {open ? (
           <CaretDownIcon size={12} color={tertiary} weight="bold" />
         ) : (

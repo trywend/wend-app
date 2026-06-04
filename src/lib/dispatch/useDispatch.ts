@@ -32,6 +32,7 @@ import {
 import { useDispatchStore } from "@/store/dispatchSlice";
 import { useDaemonStore } from "@/store/daemonSlice";
 import { useResolvedDaemonURL } from "@/lib/dispatch/useResolvedDaemonURL";
+import { buildPrompt } from "@/lib/dispatch/buildPrompt";
 
 export type DispatchEvent =
   | { type: "text"; text: string }
@@ -134,6 +135,13 @@ export function useDispatch(): UseDispatchResult {
     // un-configured daemon shouldn't flip the pip on at all.
     useDispatchStore.getState().setRunningNoteId(args.noteId ?? null);
     try {
+      // Wrap the raw note in light deterministic framing so Claude has the
+      // intent of a phone-sized message. Follow-up turns skip framing — the
+      // resumed session already has the original framing in its history.
+      const built = buildPrompt(args.prompt, {
+        followUp: Boolean(args.sessionId),
+        sessionId: args.sessionId,
+      });
       const url = `${creds.url.replace(/\/$/, "")}/run?t=${encodeURIComponent(
         creds.token,
       )}`;
@@ -141,7 +149,7 @@ export function useDispatch(): UseDispatchResult {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          prompt: args.prompt,
+          prompt: built.prompt,
           cwd: args.cwd ?? daemonCwd ?? undefined,
           sessionId: args.sessionId,
         }),
