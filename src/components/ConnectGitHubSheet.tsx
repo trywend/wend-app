@@ -3,21 +3,29 @@
  *
  * Third level of the settings modal stack (z=80). Smaller than the parents —
  * about 60% of screen height — because it's a focused confirmation surface,
- * not a list. Layout per the founder's modal-stack HTML mock:
+ * not a list.
  *
- *   GitHub mark + close X
- *   Title "Connect GitHub"
- *   Paragraph copy explaining what access enables
- *   Two permission items (read code, read metadata) — each with a green
- *   check-circle icon
- *   Authorize button (ember, full-width)
- *   Cancel button (outlined, full-width)
+ * Phase 3: this sheet is now a live OAuth surface, not a stub. On mount it
+ * calls `GET /api/integrations/list` with the Clerk JWT to see whether the
+ * user has already connected GitHub. State machine:
  *
- * Phase 2 onAuthorize is a stub — the actual OAuth handshake to grant repo
- * access lives on the daemon (Wend's host-side process). For now we log the
- * tap so the dev console shows the user got through the consent UI.
+ *   "loading"      — first paint while the list fetch is in flight.
+ *   "disconnected" — show Authorize + Cancel buttons.
+ *   "connected"    — show "Connected as @handle" + Disconnect + Done.
+ *
+ * Authorize launches the rendezvous-hosted OAuth init route inside
+ * `expo-web-browser`. The backend's callback page deep-links back to
+ * `wend://integrations`, which closes the browser and resolves
+ * `openAuthSessionAsync`. We then re-run the list fetch to learn the new
+ * status. Disconnect hits POST /api/integrations/github/disconnect and then
+ * re-runs the list fetch.
+ *
+ * Auth: we use `useAuth().getToken()` from @clerk/clerk-expo to mint a
+ * short-lived JWT for the backend on every fetch. The token never lands in
+ * persistent state.
  */
-import { Pressable, View } from "react-native";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { ActivityIndicator, Pressable, View } from "react-native";
 import Animated, {
   FadeIn,
   FadeOut,
@@ -29,6 +37,9 @@ import {
   GithubLogoIcon,
   XIcon,
 } from "phosphor-react-native";
+import * as WebBrowser from "expo-web-browser";
+import * as Linking from "expo-linking";
+import { useAuth } from "@clerk/clerk-expo";
 
 import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
@@ -36,7 +47,33 @@ import { useTheme } from "@/theme/ThemeProvider";
 export interface ConnectGitHubSheetProps {
   open: boolean;
   onClose: () => void;
+  /** Legacy hook from the v0 stub. Still called after a successful
+   *  authorize so the parent can pop the sheet / refresh higher-level
+   *  state if it wants. The OAuth dance + status fetch happens inside
+   *  this sheet — the parent doesn't need to do anything for it to
+   *  work. */
   onAuthorize: () => void;
+}
+
+/** Production rendezvous backend (Vercel deployment of `landing/`). The
+ *  GitHub OAuth routes live here. Override via
+ *  EXPO_PUBLIC_RENDEZVOUS_BASE for local dev. Kept inline rather than
+ *  imported from a shared `config/env.ts` because this is the only file
+ *  in our touch-scope. */
+const RENDEZVOUS_BASE =
+  process.env.EXPO_PUBLIC_RENDEZVOUS_BASE ||
+  "https://wend-landing.vercel.app";
+
+interface ProviderStatus {
+  connected: boolean;
+  accountLabel: string | null;
+  scopes: string | null;
+  connectedAt: string | null;
+}
+
+interface IntegrationsListResponse {
+  github?: ProviderStatus;
+  linear?: ProviderStatus;
 }
 
 export function ConnectGitHubSheet(
@@ -51,7 +88,122 @@ function ConnectGitHubSheetMounted({
   onAuthorize,
 }: ConnectGitHubSheetProps) {
   const { tokens } = useTheme();
+  const { getToken } = useAuth();
 
+  // -- Status state machine. `null` while we haven't loaded yet. --
+  const [status, setStatus] = useState<ProviderStatus | null>(null);
+  const [busy, setBusy] = useState<"idle" | "authorizing" | "disconnecting">(
+    "idle",
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch /api/integrations/list with the Clerk JWT and update state.
+  // Wrapped in useCallback so the OAuth-completed effect can reuse it.
+  const refresh = useCallback(async () => {
+    try {
+      const jwt = await getToken();
+      if (!jwt) {
+        setError("Not signed in.");
+        return;
+      }
+      const res = await fetch(
+        `${RENDEZVOUS_BASE}/api/integrations/list`,
+        { headers: { Authorization: `Bearer ${jwt}` } },
+      );
+      if (!res.ok) {
+        setError(`Couldn't read connection state (HTTP ${res.status}).`);
+        return;
+      }
+      const body = (await res.json()) as IntegrationsListResponse;
+      setStatus(
+        body.github ?? {
+          connected: false,
+          accountLabel: null,
+          scopes: null,
+          connectedAt: null,
+        },
+      );
+      setError(null);
+    } catch (e: unknown) {
+      const msg =
+        e instanceof Error ? e.message : "Network error reaching trywend.app.";
+      setError(msg);
+    }
+  }, [getToken]);
+
+  // First fetch on mount.
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const onAuthorizePress = useCallback(async () => {
+    setBusy("authorizing");
+    setError(null);
+    try {
+      const jwt = await getToken();
+      if (!jwt) {
+        setError("Not signed in.");
+        return;
+      }
+      // The init route is Clerk-authed via Bearer; once the user is on
+      // github.com the JWT is no longer needed. We pass it as a query
+      // param so the in-app browser doesn't try to attach Bearer headers
+      // across the GitHub redirect.
+      //
+      // The backend's `extractBearerToken` already accepts `?t=` for the
+      // device-token surface; the Clerk verifier reuses the same helper,
+      // so the same `?t=` convention works for JWT-authed routes too.
+      const url = `${RENDEZVOUS_BASE}/api/integrations/github/init?t=${encodeURIComponent(jwt)}`;
+      const returnUrl = Linking.createURL("/integrations");
+      const result = await WebBrowser.openAuthSessionAsync(url, returnUrl);
+      // Common outcomes:
+      //   - "success"  → the deep-link fired; refresh the list.
+      //   - "cancel"   → user dismissed the browser; do nothing.
+      //   - "dismiss"  → same.
+      if (result.type === "success") {
+        await refresh();
+        onAuthorize();
+      }
+    } catch (e: unknown) {
+      const msg =
+        e instanceof Error ? e.message : "Couldn't open the GitHub flow.";
+      setError(msg);
+    } finally {
+      setBusy("idle");
+    }
+  }, [getToken, refresh, onAuthorize]);
+
+  const onDisconnectPress = useCallback(async () => {
+    setBusy("disconnecting");
+    setError(null);
+    try {
+      const jwt = await getToken();
+      if (!jwt) {
+        setError("Not signed in.");
+        return;
+      }
+      const res = await fetch(
+        `${RENDEZVOUS_BASE}/api/integrations/github/disconnect`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${jwt}` },
+        },
+      );
+      if (!res.ok) {
+        setError(`Disconnect failed (HTTP ${res.status}).`);
+        return;
+      }
+      await refresh();
+    } catch (e: unknown) {
+      const msg =
+        e instanceof Error ? e.message : "Network error reaching trywend.app.";
+      setError(msg);
+    } finally {
+      setBusy("idle");
+    }
+  }, [getToken, refresh]);
+
+  // -- Theme tokens --
   const canvasBg = tokens["surface-canvas"];
   const inkColor = tokens["text-primary"];
   const subtleColor = tokens["text-secondary"];
@@ -60,6 +212,27 @@ function ConnectGitHubSheetMounted({
   const accent = tokens["accent-default"];
   const chipBg = tokens["surface-chip"];
   const statusDoneColor = tokens["status-done"];
+  const failedColor = tokens["status-failed"];
+
+  const isConnected = status?.connected === true;
+  const screenState: "loading" | "connected" | "disconnected" =
+    status == null ? "loading" : isConnected ? "connected" : "disconnected";
+
+  const heading = useMemo(() => {
+    if (screenState === "connected") return "GitHub connected";
+    return "Connect GitHub";
+  }, [screenState]);
+
+  const subtitle = useMemo(() => {
+    if (screenState === "connected") {
+      const label = status?.accountLabel;
+      if (label) {
+        return `Wend is connected to ${label}. You can disconnect at any time; we'll forget the access token immediately.`;
+      }
+      return "Wend is connected to your GitHub account. You can disconnect at any time.";
+    }
+    return "Allow Wend to access your repositories. This enables semantic search across your codebase and automated note linking.";
+  }, [screenState, status?.accountLabel]);
 
   return (
     <View
@@ -190,52 +363,94 @@ function ConnectGitHubSheetMounted({
         >
           <View style={{ gap: 8 }}>
             <Text variant="title" style={{ color: inkColor }}>
-              Connect GitHub
+              {heading}
             </Text>
             <Text variant="body" style={{ color: subtleColor }}>
-              Allow Wend to access your repositories. This enables semantic
-              search across your codebase and automated note linking.
+              {subtitle}
             </Text>
+            {error ? (
+              <Text variant="meta" style={{ color: failedColor }}>
+                {error}
+              </Text>
+            ) : null}
           </View>
 
-          <View style={{ gap: 16, marginTop: 4 }}>
-            <PermissionItem
-              heading="Read access to code"
-              caption="We will never modify your source files."
-              inkColor={inkColor}
-              subtleColor={subtleColor}
-              statusDoneColor={statusDoneColor}
-            />
-            <PermissionItem
-              heading="Read access to metadata"
-              caption="Issues, pull requests, and commit history."
-              inkColor={inkColor}
-              subtleColor={subtleColor}
-              statusDoneColor={statusDoneColor}
-            />
-          </View>
+          {/* Body switches on state. Loading shows a spinner where the
+              permission list would be; connected shows a single check
+              line; disconnected shows the two permission items. */}
+          {screenState === "loading" ? (
+            <View
+              style={{
+                marginTop: 4,
+                paddingVertical: 24,
+                alignItems: "center",
+              }}
+            >
+              <ActivityIndicator color={subtleColor} />
+            </View>
+          ) : screenState === "connected" ? (
+            <View style={{ gap: 16, marginTop: 4 }}>
+              <PermissionItem
+                heading={
+                  status?.accountLabel
+                    ? `Connected as ${status.accountLabel}`
+                    : "Connected"
+                }
+                caption={
+                  status?.scopes
+                    ? `Scopes: ${status.scopes}`
+                    : "Read access to code and metadata."
+                }
+                inkColor={inkColor}
+                subtleColor={subtleColor}
+                statusDoneColor={statusDoneColor}
+              />
+            </View>
+          ) : (
+            <View style={{ gap: 16, marginTop: 4 }}>
+              <PermissionItem
+                heading="Read access to code"
+                caption="We will never modify your source files."
+                inkColor={inkColor}
+                subtleColor={subtleColor}
+                statusDoneColor={statusDoneColor}
+              />
+              <PermissionItem
+                heading="Read access to metadata"
+                caption="Issues, pull requests, and commit history."
+                inkColor={inkColor}
+                subtleColor={subtleColor}
+                statusDoneColor={statusDoneColor}
+              />
+            </View>
+          )}
 
           {/* Spacer pushes the actions to the bottom. */}
           <View style={{ flex: 1 }} />
 
-          {/* Authorize — ember pill, full-width. Pressable wraps content;
-              static-style inner View holds the visual + layout. */}
+          {/* Primary action — ember pill, full-width.
+              Pressable wraps content; static-style inner View holds the visual
+              + layout. Same pattern as before (NativeWind callback gotcha). */}
           <Pressable
-            onPress={() => {
-              // eslint-disable-next-line no-console
-              console.log("[wend] GitHub authorize tapped");
-              onAuthorize();
-            }}
+            onPress={
+              screenState === "connected" ? onDisconnectPress : onAuthorizePress
+            }
+            disabled={busy !== "idle" || screenState === "loading"}
             accessibilityRole="button"
-            accessibilityLabel="Authorize"
-            style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}
+            accessibilityLabel={
+              screenState === "connected" ? "Disconnect" : "Authorize"
+            }
+            style={({ pressed }) => ({
+              opacity: pressed ? 0.85 : busy !== "idle" ? 0.7 : 1,
+            })}
           >
             <View
               style={{
                 width: "100%",
                 height: 52,
                 borderRadius: 999,
-                backgroundColor: accent,
+                backgroundColor:
+                  screenState === "connected" ? failedColor : accent,
                 alignItems: "center",
                 justifyContent: "center",
                 shadowColor: "#000",
@@ -243,8 +458,13 @@ function ConnectGitHubSheetMounted({
                 shadowOpacity: 0.12,
                 shadowRadius: 6,
                 elevation: 2,
+                flexDirection: "row",
+                gap: 8,
               }}
             >
+              {busy !== "idle" ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : null}
               <Text
                 style={{
                   color: "#FFFFFF",
@@ -252,16 +472,24 @@ function ConnectGitHubSheetMounted({
                   fontSize: 15,
                 }}
               >
-                Authorize
+                {busy === "authorizing"
+                  ? "Opening GitHub…"
+                  : busy === "disconnecting"
+                    ? "Disconnecting…"
+                    : screenState === "connected"
+                      ? "Disconnect"
+                      : "Authorize"}
               </Text>
             </View>
           </Pressable>
 
-          {/* Cancel — outlined pill. */}
+          {/* Secondary action — outlined pill. Cancel/Done copy mirrors state. */}
           <Pressable
             onPress={onClose}
             accessibilityRole="button"
-            accessibilityLabel="Cancel"
+            accessibilityLabel={
+              screenState === "connected" ? "Done" : "Cancel"
+            }
             style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })}
           >
             <View
@@ -282,7 +510,7 @@ function ConnectGitHubSheetMounted({
                   fontSize: 15,
                 }}
               >
-                Cancel
+                {screenState === "connected" ? "Done" : "Cancel"}
               </Text>
             </View>
           </Pressable>

@@ -23,7 +23,8 @@
  * backgroundColor inside the function form. Static visuals (card bg, borders,
  * tints) live on parent Views.
  */
-import { Pressable, ScrollView, Switch, View } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, Pressable, ScrollView, Switch, View } from "react-native";
 import Animated, {
   FadeIn,
   FadeOut,
@@ -43,12 +44,21 @@ import {
   XIcon,
   type Icon as PhosphorIcon,
 } from "phosphor-react-native";
-import { useUser } from "@clerk/clerk-expo";
+import { useAuth, useUser } from "@clerk/clerk-expo";
+import * as WebBrowser from "expo-web-browser";
+import * as Linking from "expo-linking";
 
 import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
 import { useUiStore, type ThemePreference } from "@/store/uiSlice";
 import { useDaemonStore } from "@/store/daemonSlice";
+
+/** Rendezvous backend that hosts the Linear OAuth routes. Kept inline
+ *  for the same reason as in ConnectGitHubSheet — this file is in the
+ *  touch-scope. Override via EXPO_PUBLIC_RENDEZVOUS_BASE for local dev. */
+const SETTINGS_RENDEZVOUS_BASE =
+  process.env.EXPO_PUBLIC_RENDEZVOUS_BASE ||
+  "https://wend-landing.vercel.app";
 
 export interface SettingsSheetProps {
   open: boolean;
@@ -102,6 +112,106 @@ function SettingsSheetMounted({
   // friendly Mac name; tapping the row opens the scanner again to re-pair.
   const macHost = useDaemonStore((s) => s.host);
   const macConnected = macHost.length > 0;
+
+  // -----------------------------------------------------------------
+  // Linear connection state — driven by GET /api/integrations/list.
+  // We refetch when the sheet mounts and after the user returns from
+  // the OAuth in-app browser. `linearStatus === null` means we haven't
+  // loaded yet — the row shows a quiet "Checking…" until then.
+  // -----------------------------------------------------------------
+  const { getToken } = useAuth();
+  const [linearStatus, setLinearStatus] = useState<{
+    connected: boolean;
+    accountLabel: string | null;
+  } | null>(null);
+  const [linearBusy, setLinearBusy] = useState<boolean>(false);
+
+  const refetchLinearStatus = useCallback(async () => {
+    try {
+      const jwt = await getToken();
+      if (!jwt) {
+        setLinearStatus({ connected: false, accountLabel: null });
+        return;
+      }
+      const res = await fetch(
+        `${SETTINGS_RENDEZVOUS_BASE}/api/integrations/list`,
+        { headers: { Authorization: `Bearer ${jwt}` } },
+      );
+      if (!res.ok) {
+        setLinearStatus({ connected: false, accountLabel: null });
+        return;
+      }
+      const body = (await res.json()) as {
+        linear?: { connected: boolean; accountLabel: string | null };
+      };
+      setLinearStatus({
+        connected: body.linear?.connected ?? false,
+        accountLabel: body.linear?.accountLabel ?? null,
+      });
+    } catch {
+      // Network error — best-effort. We'll re-fetch on the next mount.
+      setLinearStatus({ connected: false, accountLabel: null });
+    }
+  }, [getToken]);
+
+  useEffect(() => {
+    void refetchLinearStatus();
+  }, [refetchLinearStatus]);
+
+  /** Open the Linear OAuth flow in the system in-app browser, then
+   *  refetch the status when the user returns. The init route is
+   *  Clerk-authed — we pass the JWT via `?t=` so the in-app browser
+   *  doesn't need to attach Bearer headers across the linear.app
+   *  redirect. */
+  const connectLinear = useCallback(async () => {
+    setLinearBusy(true);
+    try {
+      const jwt = await getToken();
+      if (!jwt) return;
+      const url = `${SETTINGS_RENDEZVOUS_BASE}/api/integrations/linear/init?t=${encodeURIComponent(jwt)}`;
+      const returnUrl = Linking.createURL("/integrations");
+      const result = await WebBrowser.openAuthSessionAsync(url, returnUrl);
+      if (result.type === "success") {
+        await refetchLinearStatus();
+      }
+    } catch {
+      // Swallow — same shape as connectMac flow. The user can retry.
+    } finally {
+      setLinearBusy(false);
+    }
+  }, [getToken, refetchLinearStatus]);
+
+  const disconnectLinear = useCallback(async () => {
+    setLinearBusy(true);
+    try {
+      const jwt = await getToken();
+      if (!jwt) return;
+      await fetch(
+        `${SETTINGS_RENDEZVOUS_BASE}/api/integrations/linear/disconnect`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${jwt}` },
+        },
+      );
+      await refetchLinearStatus();
+    } catch {
+      // see connectLinear
+    } finally {
+      setLinearBusy(false);
+    }
+  }, [getToken, refetchLinearStatus]);
+
+  /** Tap handler — connect if not connected, disconnect if connected.
+   *  Pressed twice in fast succession is a no-op while `linearBusy`
+   *  gates re-entry. */
+  const onLinearRowPress = useCallback(() => {
+    if (linearBusy) return;
+    if (linearStatus?.connected) {
+      void disconnectLinear();
+    } else {
+      void connectLinear();
+    }
+  }, [linearBusy, linearStatus?.connected, connectLinear, disconnectLinear]);
 
   const canvasBg = tokens["surface-canvas"];
   const cardBg = tokens["surface-elevated"];
@@ -353,11 +463,29 @@ function SettingsSheetMounted({
                 <Row
                   Icon={KanbanIcon}
                   label="Linear"
-                  subtitle="Connect workspace"
+                  subtitle={
+                    linearStatus == null
+                      ? "Checking…"
+                      : linearStatus.connected
+                        ? `Active · ${linearStatus.accountLabel ?? "Connected"}`
+                        : "Connect workspace"
+                  }
                   inkColor={inkColor}
                   subtleColor={subtleColor}
                   tertiaryColor={tertiaryColor}
-                  onPress={onOpenIntegrations}
+                  onPress={onLinearRowPress}
+                  trailing={
+                    linearBusy ? (
+                      <ActivityIndicator color={subtleColor} />
+                    ) : linearStatus?.connected ? (
+                      <StatusPip
+                        label="Active"
+                        color={tokens["status-done"]}
+                      />
+                    ) : (
+                      <SmallButtonText label="Connect" color={accent} />
+                    )
+                  }
                 />
               </View>
             </View>
