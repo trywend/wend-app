@@ -25,8 +25,6 @@ import Animated, {
   SlideInDown,
   SlideOutDown,
 } from "react-native-reanimated";
-import * as ImagePicker from "expo-image-picker";
-import * as DocumentPicker from "expo-document-picker";
 import { FileIcon, ImageIcon } from "phosphor-react-native";
 
 import { Text } from "@/components/primitives";
@@ -35,6 +33,33 @@ import {
   copyAttachmentIntoNote,
   type Attachment,
 } from "@/lib/attachments";
+
+// expo-image-picker and expo-document-picker are loaded at runtime via
+// require so a dev client that was built before they were added doesn't
+// crash on module eval — same pattern as expo-camera in ConnectMacSheet.
+// When the native module is missing we surface a friendly "rebuild the
+// dev client" panel instead of taking the whole app down.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let ImagePicker: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let DocumentPicker: any = null;
+let pickersLoadError: string | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  ImagePicker = require("expo-image-picker");
+} catch (err) {
+  pickersLoadError =
+    err instanceof Error ? err.message : "expo-image-picker not available";
+}
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  DocumentPicker = require("expo-document-picker");
+} catch (err) {
+  pickersLoadError =
+    pickersLoadError ||
+    (err instanceof Error ? err.message : "expo-document-picker not available");
+}
+const pickersAvailable = Boolean(ImagePicker && DocumentPicker);
 
 export interface AttachmentPickerProps {
   open: boolean;
@@ -74,6 +99,13 @@ function Mounted({
 
   async function pickImage() {
     if (busy) return;
+    if (!pickersAvailable) {
+      Alert.alert(
+        "Rebuild the app to attach files",
+        "Photo + document picking needs a fresh dev client. Rebuild with `npx eas-cli build --profile development --platform android` (or `ios`) and reinstall the app.",
+      );
+      return;
+    }
     setBusy(true);
     try {
       // Permission first — iOS requires it for the limited-library API even
@@ -118,6 +150,13 @@ function Mounted({
 
   async function pickDocument() {
     if (busy) return;
+    if (!pickersAvailable) {
+      Alert.alert(
+        "Rebuild the app to attach files",
+        "Photo + document picking needs a fresh dev client. Rebuild with `npx eas-cli build --profile development --platform android` (or `ios`) and reinstall the app.",
+      );
+      return;
+    }
     setBusy(true);
     try {
       const result = await DocumentPicker.getDocumentAsync({
