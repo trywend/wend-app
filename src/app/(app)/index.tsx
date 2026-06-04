@@ -101,6 +101,7 @@ interface InflightRun {
   prompt: string;
   response: string;
   toolUses: string[];
+  toolCalls: Array<{ name: string; input?: unknown }>;
   sessionId: string | null;
   durationMs: number;
   costUsd: number;
@@ -300,6 +301,7 @@ export default function HomeScreen() {
         prompt: nextPromptSource.trim(),
         response: "",
         toolUses: [],
+        toolCalls: [],
         sessionId: null,
         durationMs: 0,
         costUsd: 0,
@@ -323,6 +325,7 @@ export default function HomeScreen() {
       prompt,
       response: "",
       toolUses: [],
+      toolCalls: [],
       sessionId,
       durationMs: 0,
       costUsd: 0,
@@ -335,6 +338,7 @@ export default function HomeScreen() {
 
     let accumulated = "";
     const tools: string[] = [];
+    const toolCalls: Array<{ name: string; input?: unknown }> = [];
     let resolvedSessionId: string | null = sessionId;
     let resolvedDuration = 0;
     let resolvedCost = 0;
@@ -358,7 +362,16 @@ export default function HomeScreen() {
           );
         } else if (e.type === "tool_use") {
           tools.push(e.name);
-          setInflight((s) => (s ? { ...s, toolUses: [...tools] } : s));
+          toolCalls.push({ name: e.name, input: e.input });
+          setInflight((s) =>
+            s
+              ? {
+                  ...s,
+                  toolUses: [...tools],
+                  toolCalls: [...toolCalls],
+                }
+              : s,
+          );
         } else if (e.type === "route") {
           // Daemon resolved a target. Surface it in the inflight block and,
           // if this note had no pin, persist the resolution so follow-ups
@@ -416,6 +429,7 @@ export default function HomeScreen() {
             durationMs: resolvedDuration,
             costUsd: resolvedCost,
             toolUses: [...tools],
+            toolCalls: [...toolCalls],
             error: resolvedError,
             followUp: "",
             createdAt: Date.now(),
@@ -1324,6 +1338,7 @@ function persistedRunToBlockState(run: PersistedRun): AgentRunBlockState {
     prompt: run.prompt,
     response: run.response,
     toolUses: run.toolUses,
+    toolCalls: run.toolCalls,
     durationMs: run.durationMs,
     costUsd: run.costUsd,
     error: run.error,
@@ -1336,6 +1351,7 @@ function inflightToBlockState(run: InflightRun): AgentRunBlockState {
     prompt: run.prompt,
     response: run.response,
     toolUses: run.toolUses,
+    toolCalls: run.toolCalls,
     durationMs: run.durationMs,
     costUsd: run.costUsd,
     error: run.error,

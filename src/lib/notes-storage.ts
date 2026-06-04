@@ -90,6 +90,9 @@ export interface PersistedRun {
   durationMs: number;
   costUsd: number;
   toolUses: string[];
+  /** Richer per-call records (name + input) when captured. Optional for
+   *  back-compat with rows persisted before the structured shape landed. */
+  toolCalls?: Array<{ name: string; input?: unknown }>;
   error: string | null;
   /** User text typed after this run — becomes the prompt for the NEXT run. */
   followUp: string;

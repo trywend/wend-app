@@ -28,12 +28,32 @@ import {
   TextInput,
   View,
 } from "react-native";
-import {
-  CameraView,
-  useCameraPermissions,
-  type BarcodeScanningResult,
-} from "expo-camera";
 import { useAuth } from "@clerk/clerk-expo";
+
+// expo-camera is loaded at runtime via require so a dev client that was
+// built before the package was added doesn't crash on module eval. If
+// the native module is missing we fall back to OTP-only and prompt the
+// user to rebuild (`npx expo run:android` / `npx expo run:ios`).
+type BarcodeScanningResult = { data: string };
+type CameraPermission = { granted: boolean; canAskAgain: boolean };
+type UseCameraPermissionsHook = () => [
+  CameraPermission | null,
+  () => Promise<CameraPermission>,
+];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let CameraView: any = null;
+let useCameraPermissions: UseCameraPermissionsHook | null = null;
+let cameraLoadError: string | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const mod = require("expo-camera");
+  CameraView = mod.CameraView;
+  useCameraPermissions = mod.useCameraPermissions;
+} catch (err) {
+  cameraLoadError =
+    err instanceof Error ? err.message : "expo-camera not available";
+}
+const cameraAvailable = Boolean(CameraView && useCameraPermissions);
 import Animated, {
   FadeIn,
   FadeOut,
@@ -199,8 +219,12 @@ export function ConnectMacSheet(
 
 function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
   const { tokens } = useTheme();
-  const [permission, requestPermission] = useCameraPermissions();
-  const [mode, setMode] = useState<Mode>("scanning");
+  // When the native module isn't linked into this dev client build, the
+  // hook is null and we skip the permission flow entirely — the user
+  // sees a "rebuild" notice and the OTP path remains usable.
+  const cameraHook = useCameraPermissions ?? (() => [null, async () => ({ granted: false, canAskAgain: false })] as const);
+  const [permission, requestPermission] = cameraHook();
+  const [mode, setMode] = useState<Mode>(cameraAvailable ? "scanning" : "code");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [pairedHost, setPairedHost] = useState<string | null>(null);
   const [manualText, setManualText] = useState<string>("");
@@ -285,7 +309,7 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
 
   function tryAgain() {
     setErrorMsg(null);
-    setMode("scanning");
+    setMode(cameraAvailable ? "scanning" : "code");
     lockRef.current = false;
   }
 
@@ -423,15 +447,26 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
 
         {/* Body switches on mode */}
         <View style={{ flex: 1, paddingHorizontal: 20, paddingBottom: 24 }}>
-          {!permission ? (
+          {!cameraAvailable && mode === "scanning" ? (
+            <CameraUnavailableView
+              detail={cameraLoadError ?? "Camera module not linked."}
+              onUseCode={() => setMode("code")}
+              onUseManual={() => setMode("manual")}
+              ink={ink}
+              subtle={subtle}
+              border={border}
+              accent={accent}
+              accentOn={accentOn}
+            />
+          ) : cameraAvailable && !permission ? (
             <Centered>
               <Text style={{ color: subtle, fontFamily: "Inter-Regular", fontSize: 14 }}>
                 Checking camera permission…
               </Text>
             </Centered>
-          ) : !permission.granted ? (
+          ) : cameraAvailable && !permission?.granted ? (
             <DeniedView
-              canAskAgain={permission.canAskAgain}
+              canAskAgain={permission?.canAskAgain ?? false}
               onAsk={() => void requestPermission()}
               onOpenSettings={() => void Linking.openSettings()}
               ink={ink}
@@ -490,7 +525,7 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
                 setMode("success");
                 setTimeout(onClose, 1400);
               }}
-              onCancel={() => setMode("scanning")}
+              onCancel={() => (cameraAvailable ? setMode("scanning") : onClose())}
               ink={ink}
               subtle={subtle}
               border={border}
@@ -502,7 +537,7 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
               value={manualText}
               onChange={setManualText}
               onSubmit={trySubmitManual}
-              onCancel={() => setMode("scanning")}
+              onCancel={() => setMode(cameraAvailable ? "scanning" : "code")}
               error={errorMsg}
               ink={ink}
               subtle={subtle}
@@ -649,6 +684,85 @@ function ScanView(props: {
         </Pressable>
       </View>
     </>
+  );
+}
+
+/* ─── Camera-unavailable fallback ───────────────────────────────────── */
+
+function CameraUnavailableView(props: {
+  detail: string;
+  onUseCode: () => void;
+  onUseManual: () => void;
+  ink: string;
+  subtle: string;
+  border: string;
+  accent: string;
+  accentOn: string;
+}) {
+  return (
+    <Centered>
+      <View
+        style={{
+          width: 64,
+          height: 64,
+          borderRadius: 32,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: `${props.subtle}14`,
+          marginBottom: 16,
+        }}
+      >
+        <QrCodeIcon size={28} color={props.subtle} weight="regular" />
+      </View>
+      <Text
+        style={{
+          fontFamily: "Inter-SemiBold",
+          fontSize: 17,
+          color: props.ink,
+          textAlign: "center",
+          marginBottom: 6,
+        }}
+      >
+        Camera not available in this build
+      </Text>
+      <Text
+        style={{
+          fontFamily: "Inter-Regular",
+          fontSize: 13,
+          color: props.subtle,
+          textAlign: "center",
+          marginBottom: 18,
+          paddingHorizontal: 20,
+          lineHeight: 18,
+        }}
+      >
+        Rebuild the dev client with `npx expo run:android` (or `run:ios`)
+        to enable the QR scanner. You can still pair by typing the
+        6-digit code shown on your Mac.
+      </Text>
+      <PillButton
+        label="Type code instead"
+        onPress={props.onUseCode}
+        bg={props.accent}
+        fg={props.accentOn}
+      />
+      <Pressable
+        onPress={props.onUseManual}
+        accessibilityRole="button"
+        style={({ pressed }) => ({ marginTop: 12, opacity: pressed ? 0.6 : 1 })}
+      >
+        <Text
+          style={{
+            fontFamily: "Inter-Medium",
+            fontSize: 13,
+            color: props.subtle,
+            textDecorationLine: "underline",
+          }}
+        >
+          Paste pairing JSON instead
+        </Text>
+      </Pressable>
+    </Centered>
   );
 }
 

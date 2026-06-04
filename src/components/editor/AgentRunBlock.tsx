@@ -1,30 +1,35 @@
 /**
  * Wend — AgentRunBlock.
  *
- * The S3 design visual for a single agent run, rendered as a readonly,
- * card-shaped block inside the note. Three render states:
+ * Card-shaped block that renders one Claude run inside the note transcript.
+ * Lives between user text and the follow-up input. Three statuses:
  *
- *   - Running: spinning circle in header, stop button, streaming text + caret.
- *   - Done:    check in header, full response, meta footer (duration · cost).
- *   - Error:   warning in header, error message in subtle color.
+ *   - running: spinner in header, optional stop button, streaming markdown
+ *               body, blinking caret.
+ *   - done:    check in header, markdown body, meta footer (duration · cost).
+ *               Collapsible — the whole header is tap-to-toggle.
+ *   - error:   warning in header, error caption + Retry pill.
  *
- * Visually distinct from the user's editable text so the multi-block editor
- * reads as a transcript: [body] → [run 1] → [followUp 1] → [run 2] → ...
+ * Goals of the redesign:
+ *   1. Body reads as a note, not a terminal. Inter prose for text, mono only
+ *      for inline code and code blocks. Headings, lists, blockquotes all
+ *      rendered with native typography (see `Markdown.tsx`).
+ *   2. Header collapses. Tap the title row to fold the run into a one-line
+ *      summary while keeping the meta visible — useful in long conversations.
+ *   3. Tool calls are first-class. The chip strip stays compact; expanding
+ *      reveals a list of structured cards with each tool name + input preview.
  *
- * Color mapping (Material → Paper & Ember tokens, per task spec):
- *   surface-container-low → tokens["surface-elevated"]
- *   paper-100             → tokens["surface-agent"]
- *   outline-variant       → tokens["border-hairline"]
- *   on-surface            → tokens["text-primary"]
- *   on-surface-variant    → tokens["text-secondary"]
- *   primary               → tokens["accent-default"]
- *   tertiary              → tokens["status-running"] (closest amber/ember match)
+ * State surface keeps a backward-compat field (`toolUses: string[]`) plus a
+ * richer optional `toolCalls?: ToolCall[]` for newer runs. Old persisted runs
+ * without toolCalls fall back to the name-only chip strip.
  */
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Animated as RNAnimated, Easing, Pressable, View } from "react-native";
 import Animated, {
   cancelAnimation,
   Easing as REasing,
+  FadeIn,
+  FadeOut,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
@@ -32,22 +37,37 @@ import Animated, {
 } from "react-native-reanimated";
 import {
   ArrowClockwiseIcon,
+  CaretDownIcon,
+  CaretRightIcon,
   CheckIcon,
   CircleNotchIcon,
   StopIcon,
   WarningIcon,
+  WrenchIcon,
 } from "phosphor-react-native";
 
 import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
+import { Markdown } from "@/components/editor/Markdown";
+import { parseMarkdown, summarizeMarkdown } from "@/lib/agentMarkdown";
+
+export interface ToolCall {
+  name: string;
+  /** Raw input object from Claude — rendered as a 1-2 line preview. Optional
+   *  because older persisted runs don't carry input. */
+  input?: unknown;
+}
 
 export interface AgentRunBlockState {
   status: "running" | "done" | "error";
   /** What was sent to Claude — used to extract a ticket chip. */
   prompt: string;
-  /** Accumulated streamed text. */
+  /** Accumulated streamed text (markdown). */
   response: string;
+  /** Name-only chip strip — preserved for back-compat. */
   toolUses: string[];
+  /** Richer per-call records when available. */
+  toolCalls?: ToolCall[];
   durationMs: number;
   costUsd: number;
   error: string | null;
@@ -57,25 +77,43 @@ export interface AgentRunBlockProps {
   state: AgentRunBlockState;
   /** Only rendered when status === "running". */
   onStop?: () => void;
-  /** Project the daemon resolved this run into — surfaced as the 3rd chip in
-   *  the header. `null`/undefined falls back to a static "Mac" label, matching
-   *  the design before smart routing landed. */
+  /** Project the daemon resolved into — surfaced as the 2nd chip. */
   projectName?: string | null;
-  /** Re-run the failed prompt. Only consulted when status === "error" — the
-   *  screen owns the actual re-dispatch logic; this block just renders the
-   *  pill and forwards the press. */
+  /** Re-run the failed prompt. */
   onRetry?: () => void;
 }
 
-export function AgentRunBlock({ state, onStop, projectName, onRetry }: AgentRunBlockProps) {
+export function AgentRunBlock({
+  state,
+  onStop,
+  projectName,
+  onRetry,
+}: AgentRunBlockProps) {
   const { tokens } = useTheme();
   const running = state.status === "running";
   const errored = state.status === "error";
   const done = state.status === "done";
 
-  const ticket = extractTicket(state.prompt);
+  const ticket = useMemo(() => extractTicket(state.prompt), [state.prompt]);
+  const blocks = useMemo(
+    () => parseMarkdown(state.response),
+    [state.response],
+  );
+  const summary = useMemo(
+    () => summarizeMarkdown(state.response, 90),
+    [state.response],
+  );
 
-  /* ─── Header icon ───────────────────────────────────────────────────── */
+  // Body fold state. Running always expanded. Done starts expanded — user can
+  // tap to collapse. Error stays expanded so the message is visible.
+  const [bodyOpen, setBodyOpen] = useState(true);
+  // Tool drawer fold state. Closed by default to keep the body the focus.
+  const [toolsOpen, setToolsOpen] = useState(false);
+
+  // While streaming, force-open so users see new text appearing.
+  const showBody = running || bodyOpen;
+
+  /* ─── Header spinner ──────────────────────────────────────────────── */
   const rotation = useSharedValue(0);
   useEffect(() => {
     if (running) {
@@ -89,16 +127,14 @@ export function AgentRunBlock({ state, onStop, projectName, onRetry }: AgentRunB
       cancelAnimation(rotation);
       rotation.value = 0;
     }
-    return () => {
-      cancelAnimation(rotation);
-    };
+    return () => cancelAnimation(rotation);
   }, [running, rotation]);
 
   const spinnerStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${rotation.value}deg` }],
   }));
 
-  /* ─── Streaming caret (1Hz blink, RN Animated to match existing pattern) ─ */
+  /* ─── Streaming caret ─────────────────────────────────────────────── */
   const caret = useRef(new RNAnimated.Value(1)).current;
   useEffect(() => {
     if (!running) return;
@@ -124,72 +160,88 @@ export function AgentRunBlock({ state, onStop, projectName, onRetry }: AgentRunB
     return () => loop.stop();
   }, [running, caret]);
 
+  /* ─── Tokens ─────────────────────────────────────────────────────── */
+  const ink = tokens["text-primary"];
+  const subtle = tokens["text-secondary"];
+  const tertiary = tokens["text-tertiary"];
+  const border = tokens["border-hairline"];
+  const accent = tokens["accent-default"];
+  const surfaceAgent = tokens["surface-agent"];
+  const surfaceElev = tokens["surface-elevated"];
+
   const headerIcon = running ? (
     <Animated.View style={spinnerStyle}>
-      <CircleNotchIcon size={14} color={tokens["accent-default"]} weight="bold" />
+      <CircleNotchIcon size={14} color={accent} weight="bold" />
     </Animated.View>
   ) : errored ? (
     <WarningIcon size={14} color={tokens["status-failed"]} weight="fill" />
   ) : (
-    <CheckIcon size={14} color={tokens["accent-default"]} weight="bold" />
+    <CheckIcon size={14} color={accent} weight="bold" />
   );
+
+  // Tool call data — prefer toolCalls if present, fall back to toolUses.
+  const calls: ToolCall[] = state.toolCalls?.length
+    ? state.toolCalls
+    : state.toolUses.map((name) => ({ name }));
+  const hasTools = calls.length > 0;
 
   return (
     <View
       style={{
         marginTop: 16,
         borderWidth: 1,
-        borderColor: tokens["border-hairline"],
-        borderRadius: 12,
-        backgroundColor: tokens["surface-agent"],
+        borderColor: border,
+        borderRadius: 14,
+        backgroundColor: surfaceAgent,
         overflow: "hidden",
         shadowColor: "#000",
-        shadowOpacity: 0.06,
-        shadowRadius: 8,
+        shadowOpacity: 0.05,
+        shadowRadius: 10,
         shadowOffset: { width: 0, height: 2 },
         elevation: 2,
       }}
     >
-      {/* Header */}
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
-          paddingHorizontal: 14,
-          paddingVertical: 10,
-          borderBottomWidth: 1,
-          borderBottomColor: tokens["border-hairline"],
-          backgroundColor: tokens["surface-elevated"],
-        }}
+      {/* ─── Header — tap to toggle (only when done) ─────────────────── */}
+      <Pressable
+        onPress={done ? () => setBodyOpen((v) => !v) : undefined}
+        accessibilityRole={done ? "button" : undefined}
+        accessibilityLabel={done ? (bodyOpen ? "Collapse response" : "Expand response") : undefined}
+        disabled={!done}
+        style={({ pressed }) => ({
+          opacity: pressed && done ? 0.7 : 1,
+        })}
       >
         <View
           style={{
             flexDirection: "row",
             alignItems: "center",
-            flexShrink: 1,
+            paddingHorizontal: 14,
+            paddingVertical: 12,
+            borderBottomWidth: showBody ? 1 : 0,
+            borderBottomColor: border,
+            backgroundColor: surfaceElev,
+            gap: 8,
           }}
         >
           {headerIcon}
           <Text
             style={{
-              marginLeft: 8,
-              fontFamily: "Inter-Medium",
-              fontSize: 12,
-              color: tokens["text-secondary"],
+              fontFamily: "Inter-SemiBold",
+              fontSize: 12.5,
+              color: ink,
+              letterSpacing: -0.1,
             }}
           >
             Claude
           </Text>
-          <Dot color={tokens["text-tertiary"]} />
+          <Dot color={tertiary} />
           <Text
             style={{
               fontFamily: projectName ? "JetBrainsMono-Medium" : "Inter-Medium",
               fontSize: 12,
-              color: projectName
-                ? tokens["text-primary"]
-                : tokens["text-secondary"],
+              color: projectName ? ink : subtle,
               letterSpacing: projectName ? -0.2 : 0,
+              flexShrink: 1,
             }}
             numberOfLines={1}
           >
@@ -197,7 +249,7 @@ export function AgentRunBlock({ state, onStop, projectName, onRetry }: AgentRunB
           </Text>
           {ticket ? (
             <>
-              <Dot color={tokens["text-tertiary"]} />
+              <Dot color={tertiary} />
               <Text
                 style={{
                   fontFamily: "JetBrainsMono-Medium",
@@ -210,190 +262,396 @@ export function AgentRunBlock({ state, onStop, projectName, onRetry }: AgentRunB
               </Text>
             </>
           ) : null}
-        </View>
 
-        {running && onStop ? (
-          <Pressable
-            onPress={onStop}
-            accessibilityRole="button"
-            accessibilityLabel="Stop dispatch"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            style={({ pressed }) => ({
-              width: 28,
-              height: 28,
-              borderRadius: 14,
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: pressed ? 0.55 : 1,
-            })}
-          >
-            <StopIcon
-              size={16}
-              color={tokens["text-secondary"]}
-              weight="fill"
-            />
-          </Pressable>
-        ) : null}
-      </View>
+          {/* Spacer */}
+          <View style={{ flex: 1 }} />
 
-      {/* Tool-use chips */}
-      {state.toolUses.length > 0 ? (
-        <View
-          style={{
-            flexDirection: "row",
-            flexWrap: "wrap",
-            paddingHorizontal: 14,
-            paddingTop: 10,
-          }}
-        >
-          {state.toolUses.map((name, i) => (
-            <View
-              key={`${name}-${i}`}
+          {/* Done: cost/duration in header, then caret. */}
+          {done && (state.durationMs > 0 || state.costUsd > 0) ? (
+            <Text
               style={{
-                paddingHorizontal: 8,
-                paddingVertical: 2,
-                borderRadius: 4,
-                borderWidth: 1,
-                borderColor: tokens["border-hairline"],
-                marginRight: 6,
-                marginBottom: 4,
+                fontFamily: "JetBrainsMono",
+                fontSize: 11,
+                color: tertiary,
               }}
             >
-              <Text
-                style={{
-                  fontFamily: "JetBrainsMono-Medium",
-                  fontSize: 11,
-                  color: tokens["text-secondary"],
-                }}
-              >
-                {name}
-              </Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
+              {formatDuration(state.durationMs)}
+              {state.costUsd > 0 ? ` · $${state.costUsd.toFixed(3)}` : ""}
+            </Text>
+          ) : null}
+          {done ? (
+            bodyOpen ? (
+              <CaretDownIcon size={14} color={tertiary} weight="bold" />
+            ) : (
+              <CaretRightIcon size={14} color={tertiary} weight="bold" />
+            )
+          ) : null}
 
-      {/* Body — streaming or final response */}
-      {state.response.length > 0 || running ? (
-        <View
-          style={{
-            paddingHorizontal: 14,
-            paddingVertical: 12,
-          }}
-        >
-          <Text
-            style={{
-              fontFamily: "JetBrainsMono",
-              fontSize: 14,
-              lineHeight: 22,
-              color: tokens["text-primary"],
-            }}
-          >
-            {state.response}
-            {running ? (
-              <RNAnimated.Text
-                style={{
-                  opacity: caret,
-                  color: tokens["accent-caret"],
-                  fontFamily: "JetBrainsMono",
-                }}
-              >
-                {"▍"}
-              </RNAnimated.Text>
-            ) : null}
-          </Text>
-        </View>
-      ) : null}
-
-      {/* Error caption */}
-      {errored && state.error ? (
-        <View
-          style={{
-            paddingHorizontal: 14,
-            paddingVertical: 12,
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "space-between",
-          }}
-        >
-          <Text
-            style={{
-              flex: 1,
-              marginRight: onRetry ? 12 : 0,
-              fontFamily: "Inter-Regular",
-              fontSize: 13,
-              color: tokens["text-secondary"],
-            }}
-          >
-            {state.error}
-          </Text>
-          {onRetry ? (
-            // NativeWind 4 cssInterop gotcha: backgroundColor placed inside
-            // a Pressable's function-form style is corrupted on iOS. So we
-            // paint the pill on the wrapper View and overlay a transparent
-            // Pressable inside for hit-tests + press feedback.
-            <View
-              style={{
-                position: "relative",
-                height: 32,
-                borderRadius: 16,
-                paddingHorizontal: 12,
-                flexDirection: "row",
+          {/* Running: stop button. */}
+          {running && onStop ? (
+            <Pressable
+              onPress={onStop}
+              accessibilityRole="button"
+              accessibilityLabel="Stop dispatch"
+              hitSlop={8}
+              style={({ pressed }) => ({
+                width: 28,
+                height: 28,
+                borderRadius: 14,
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: tokens["accent-default"],
-                overflow: "hidden",
-              }}
+                backgroundColor: pressed ? `${subtle}22` : "transparent",
+              })}
             >
-              <ArrowClockwiseIcon size={14} color="#FFFFFF" weight="bold" />
-              <Text
-                style={{
-                  marginLeft: 6,
-                  fontFamily: "Inter-Medium",
-                  fontSize: 13,
-                  color: "#FFFFFF",
-                }}
-              >
-                Retry
-              </Text>
-              <Pressable
-                onPress={onRetry}
-                accessibilityRole="button"
-                accessibilityLabel="Retry dispatch"
-                style={({ pressed }) => ({
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  opacity: pressed ? 0.7 : 1,
-                })}
-              />
-            </View>
+              <StopIcon size={14} color={subtle} weight="fill" />
+            </Pressable>
           ) : null}
         </View>
-      ) : null}
+      </Pressable>
 
-      {/* Meta footer — done state only */}
-      {done && (state.durationMs > 0 || state.costUsd > 0) ? (
-        <View
-          style={{
-            paddingHorizontal: 14,
-            paddingBottom: 12,
-            paddingTop: 2,
-          }}
-        >
-          <Text
+      {/* ─── Collapsed summary line (done && !bodyOpen) ───────────────── */}
+      {done && !bodyOpen && summary.length > 0 ? (
+        <Animated.View entering={FadeIn.duration(160)}>
+          <View
             style={{
-              fontFamily: "JetBrainsMono",
-              fontSize: 11,
-              color: tokens["text-tertiary"],
+              paddingHorizontal: 14,
+              paddingVertical: 12,
             }}
           >
-            {formatDuration(state.durationMs)}
-            {state.costUsd > 0 ? ` · $${state.costUsd.toFixed(4)}` : ""}
-          </Text>
-        </View>
+            <Text
+              numberOfLines={2}
+              style={{
+                fontFamily: "Inter-Regular",
+                fontSize: 13.5,
+                lineHeight: 20,
+                color: subtle,
+                letterSpacing: -0.1,
+              }}
+            >
+              {summary}
+            </Text>
+          </View>
+        </Animated.View>
+      ) : null}
+
+      {/* ─── Body — markdown + tool drawer + meta ─────────────────────── */}
+      {showBody ? (
+        <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(120)}>
+          {/* Tool drawer */}
+          {hasTools ? (
+            <ToolDrawer
+              calls={calls}
+              open={toolsOpen}
+              onToggle={() => setToolsOpen((v) => !v)}
+              ink={ink}
+              subtle={subtle}
+              tertiary={tertiary}
+              border={border}
+              accent={accent}
+              chipBg={tokens["surface-chip"]}
+            />
+          ) : null}
+
+          {/* Response body */}
+          {state.response.length > 0 || running ? (
+            <View
+              style={{
+                paddingHorizontal: 14,
+                paddingTop: hasTools ? 4 : 14,
+                paddingBottom: errored || (done && state.costUsd === 0 && state.durationMs === 0) ? 14 : 6,
+              }}
+            >
+              <Markdown blocks={blocks} />
+              {running ? (
+                <RNAnimated.Text
+                  style={{
+                    marginTop: 2,
+                    opacity: caret,
+                    color: tokens["accent-caret"],
+                    fontFamily: "JetBrainsMono",
+                    fontSize: 14,
+                  }}
+                >
+                  {"▍"}
+                </RNAnimated.Text>
+              ) : null}
+            </View>
+          ) : null}
+
+          {/* Error caption + Retry */}
+          {errored && state.error ? (
+            <View
+              style={{
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 12,
+                borderTopWidth: state.response.length > 0 ? 1 : 0,
+                borderTopColor: border,
+                backgroundColor: `${tokens["status-failed"]}0A`,
+              }}
+            >
+              <Text
+                style={{
+                  flex: 1,
+                  fontFamily: "Inter-Regular",
+                  fontSize: 13,
+                  color: tokens["status-failed"],
+                  lineHeight: 19,
+                }}
+              >
+                {state.error}
+              </Text>
+              {onRetry ? (
+                <View
+                  style={{
+                    position: "relative",
+                    height: 30,
+                    borderRadius: 15,
+                    paddingHorizontal: 12,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    backgroundColor: accent,
+                    overflow: "hidden",
+                  }}
+                >
+                  <ArrowClockwiseIcon size={12} color="#FFFFFF" weight="bold" />
+                  <Text
+                    style={{
+                      marginLeft: 6,
+                      fontFamily: "Inter-SemiBold",
+                      fontSize: 12.5,
+                      color: "#FFFFFF",
+                    }}
+                  >
+                    Retry
+                  </Text>
+                  <Pressable
+                    onPress={onRetry}
+                    accessibilityRole="button"
+                    accessibilityLabel="Retry dispatch"
+                    style={({ pressed }) => ({
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      opacity: pressed ? 0.7 : 1,
+                    })}
+                  />
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+        </Animated.View>
+      ) : null}
+    </View>
+  );
+}
+
+/* ─── Tool drawer ───────────────────────────────────────────────────────── */
+
+function ToolDrawer({
+  calls,
+  open,
+  onToggle,
+  ink,
+  subtle,
+  tertiary,
+  border,
+  accent,
+  chipBg,
+}: {
+  calls: ToolCall[];
+  open: boolean;
+  onToggle: () => void;
+  ink: string;
+  subtle: string;
+  tertiary: string;
+  border: string;
+  accent: string;
+  chipBg: string;
+}) {
+  const preview = calls.slice(0, 4).map((c) => c.name);
+  const overflow = calls.length - preview.length;
+
+  return (
+    <View
+      style={{
+        borderBottomWidth: open ? 1 : 0,
+        borderBottomColor: border,
+        backgroundColor: open ? "transparent" : undefined,
+      }}
+    >
+      <Pressable
+        onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityLabel={open ? "Hide tool calls" : "Show tool calls"}
+        style={({ pressed }) => ({
+          paddingHorizontal: 14,
+          paddingVertical: 10,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
+          opacity: pressed ? 0.7 : 1,
+        })}
+      >
+        <WrenchIcon size={13} color={accent} weight="regular" />
+        <Text
+          style={{
+            fontFamily: "Inter-SemiBold",
+            fontSize: 12,
+            color: ink,
+            letterSpacing: -0.1,
+          }}
+        >
+          {calls.length} {calls.length === 1 ? "tool" : "tools"}
+        </Text>
+        {!open ? (
+          <View
+            style={{
+              flex: 1,
+              flexDirection: "row",
+              flexWrap: "wrap",
+              gap: 4,
+              alignItems: "center",
+            }}
+          >
+            {preview.map((name, i) => (
+              <View
+                key={`${name}-${i}`}
+                style={{
+                  paddingHorizontal: 7,
+                  paddingVertical: 1,
+                  borderRadius: 999,
+                  backgroundColor: chipBg,
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily: "JetBrainsMono-Medium",
+                    fontSize: 10.5,
+                    color: subtle,
+                  }}
+                >
+                  {name}
+                </Text>
+              </View>
+            ))}
+            {overflow > 0 ? (
+              <Text
+                style={{
+                  fontFamily: "Inter-Medium",
+                  fontSize: 11,
+                  color: tertiary,
+                }}
+              >
+                +{overflow}
+              </Text>
+            ) : null}
+          </View>
+        ) : (
+          <View style={{ flex: 1 }} />
+        )}
+        {open ? (
+          <CaretDownIcon size={12} color={tertiary} weight="bold" />
+        ) : (
+          <CaretRightIcon size={12} color={tertiary} weight="bold" />
+        )}
+      </Pressable>
+
+      {open ? (
+        <Animated.View
+          entering={FadeIn.duration(160)}
+          style={{
+            paddingHorizontal: 10,
+            paddingBottom: 10,
+            gap: 6,
+          }}
+        >
+          {calls.map((call, i) => (
+            <ToolCallCard
+              key={i}
+              call={call}
+              index={i + 1}
+              ink={ink}
+              subtle={subtle}
+              tertiary={tertiary}
+              border={border}
+            />
+          ))}
+        </Animated.View>
+      ) : null}
+    </View>
+  );
+}
+
+function ToolCallCard({
+  call,
+  index,
+  ink,
+  subtle,
+  tertiary,
+  border,
+}: {
+  call: ToolCall;
+  index: number;
+  ink: string;
+  subtle: string;
+  tertiary: string;
+  border: string;
+}) {
+  const preview = useMemo(() => summarizeToolInput(call.input), [call.input]);
+  return (
+    <View
+      style={{
+        borderWidth: 1,
+        borderColor: border,
+        borderRadius: 10,
+        paddingHorizontal: 10,
+        paddingVertical: 8,
+        backgroundColor: "#FFFFFF",
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <Text
+          style={{
+            fontFamily: "JetBrainsMono-Medium",
+            fontSize: 10.5,
+            color: tertiary,
+            minWidth: 18,
+          }}
+        >
+          {String(index).padStart(2, "0")}
+        </Text>
+        <Text
+          style={{
+            fontFamily: "JetBrainsMono-Medium",
+            fontSize: 12,
+            color: ink,
+            letterSpacing: -0.2,
+          }}
+        >
+          {call.name}
+        </Text>
+      </View>
+      {preview ? (
+        <Text
+          numberOfLines={2}
+          style={{
+            marginTop: 4,
+            marginLeft: 24,
+            fontFamily: "JetBrainsMono",
+            fontSize: 11,
+            lineHeight: 16,
+            color: subtle,
+          }}
+        >
+          {preview}
+        </Text>
       ) : null}
     </View>
   );
@@ -403,27 +661,65 @@ export function AgentRunBlock({ state, onStop, projectName, onRetry }: AgentRunB
 
 function Dot({ color }: { color: string }) {
   return (
-    <Text
+    <View
       style={{
-        marginHorizontal: 6,
-        fontSize: 12,
-        color,
+        width: 3,
+        height: 3,
+        borderRadius: 999,
+        backgroundColor: color,
+        opacity: 0.6,
       }}
-    >
-      •
-    </Text>
+    />
   );
 }
 
 function formatDuration(ms: number): string {
-  const totalSeconds = Math.round(ms / 1000);
-  if (totalSeconds < 60) return `${totalSeconds}s`;
-  const m = Math.floor(totalSeconds / 60);
-  const s = totalSeconds % 60;
+  if (ms < 1000) return `${ms}ms`;
+  const totalSec = Math.round(ms / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
   return `${m}m ${s.toString().padStart(2, "0")}s`;
 }
 
 function extractTicket(text: string): string | null {
   const match = text.match(/\b[A-Z]{2,}-\d+\b/);
   return match ? match[0] : null;
+}
+
+/**
+ * Turn an arbitrary tool input object into a 1-line preview. Tries the
+ * most-likely useful keys first (file_path, command, query), falls back to
+ * a compact JSON snippet.
+ */
+function summarizeToolInput(input: unknown): string | null {
+  if (input == null) return null;
+  if (typeof input === "string") return input;
+  if (typeof input !== "object") return String(input);
+
+  const obj = input as Record<string, unknown>;
+  // Common Claude tool fields — show whichever is present.
+  const priority = [
+    "file_path",
+    "path",
+    "command",
+    "query",
+    "pattern",
+    "url",
+    "description",
+  ];
+  for (const key of priority) {
+    const v = obj[key];
+    if (typeof v === "string" && v.length > 0) {
+      return `${key}: ${v}`;
+    }
+  }
+  // Fallback: compact JSON, no quotes around keys.
+  try {
+    const json = JSON.stringify(obj);
+    if (json.length > 120) return json.slice(0, 119) + "…";
+    return json;
+  } catch {
+    return null;
+  }
 }
