@@ -24,9 +24,15 @@ export interface MarkdownProps {
   textColor?: string;
   /** Renders inline only — useful in the collapsed accordion header. */
   inline?: boolean;
+  /**
+   * Tap handler for file-path inline nodes. When omitted the path renders as
+   * plain mono text — graceful degradation so callers that don't surface a
+   * viewer don't end up with a "click does nothing" affordance.
+   */
+  onOpenFile?: (path: string) => void;
 }
 
-export function Markdown({ blocks, textColor, inline }: MarkdownProps) {
+export function Markdown({ blocks, textColor, inline, onOpenFile }: MarkdownProps) {
   const { tokens } = useTheme();
   const ink = textColor ?? tokens["text-primary"];
 
@@ -43,7 +49,7 @@ export function Markdown({ blocks, textColor, inline }: MarkdownProps) {
         numberOfLines={2}
       >
         {blocks.map((b, i) => (
-          <InlineFlatten key={i} block={b} ink={ink} />
+          <InlineFlatten key={i} block={b} ink={ink} onOpenFile={onOpenFile} />
         ))}
       </Text>
     );
@@ -52,13 +58,21 @@ export function Markdown({ blocks, textColor, inline }: MarkdownProps) {
   return (
     <View style={{ gap: 10 }}>
       {blocks.map((block, i) => (
-        <BlockNode key={i} block={block} ink={ink} />
+        <BlockNode key={i} block={block} ink={ink} onOpenFile={onOpenFile} />
       ))}
     </View>
   );
 }
 
-function BlockNode({ block, ink }: { block: Block; ink: string }) {
+function BlockNode({
+  block,
+  ink,
+  onOpenFile,
+}: {
+  block: Block;
+  ink: string;
+  onOpenFile?: (path: string) => void;
+}) {
   const { tokens } = useTheme();
   switch (block.type) {
     case "heading": {
@@ -82,7 +96,7 @@ function BlockNode({ block, ink }: { block: Block; ink: string }) {
           }}
         >
           {block.nodes.map((n, i) => (
-            <InlineRun key={i} node={n} ink={ink} />
+            <InlineRun key={i} node={n} ink={ink} onOpenFile={onOpenFile} />
           ))}
         </Text>
       );
@@ -99,7 +113,7 @@ function BlockNode({ block, ink }: { block: Block; ink: string }) {
           }}
         >
           {block.nodes.map((n, i) => (
-            <InlineRun key={i} node={n} ink={ink} />
+            <InlineRun key={i} node={n} ink={ink} onOpenFile={onOpenFile} />
           ))}
         </Text>
       );
@@ -188,7 +202,7 @@ function BlockNode({ block, ink }: { block: Block; ink: string }) {
                 }}
               >
                 {item.map((n, j) => (
-                  <InlineRun key={j} node={n} ink={ink} />
+                  <InlineRun key={j} node={n} ink={ink} onOpenFile={onOpenFile} />
                 ))}
               </Text>
             </View>
@@ -215,7 +229,12 @@ function BlockNode({ block, ink }: { block: Block; ink: string }) {
             }}
           >
             {block.nodes.map((n, i) => (
-              <InlineRun key={i} node={n} ink={tokens["text-secondary"]} />
+              <InlineRun
+                key={i}
+                node={n}
+                ink={tokens["text-secondary"]}
+                onOpenFile={onOpenFile}
+              />
             ))}
           </Text>
         </View>
@@ -233,7 +252,15 @@ function BlockNode({ block, ink }: { block: Block; ink: string }) {
   }
 }
 
-function InlineRun({ node, ink }: { node: InlineNode; ink: string }) {
+function InlineRun({
+  node,
+  ink,
+  onOpenFile,
+}: {
+  node: InlineNode;
+  ink: string;
+  onOpenFile?: (path: string) => void;
+}) {
   const { tokens } = useTheme();
   switch (node.type) {
     case "text":
@@ -242,7 +269,7 @@ function InlineRun({ node, ink }: { node: InlineNode; ink: string }) {
       return (
         <Text style={{ fontFamily: "Inter-SemiBold", color: ink }}>
           {node.nodes.map((n, i) => (
-            <InlineRun key={i} node={n} ink={ink} />
+            <InlineRun key={i} node={n} ink={ink} onOpenFile={onOpenFile} />
           ))}
         </Text>
       );
@@ -250,7 +277,7 @@ function InlineRun({ node, ink }: { node: InlineNode; ink: string }) {
       return (
         <Text style={{ fontStyle: "italic", color: ink }}>
           {node.nodes.map((n, i) => (
-            <InlineRun key={i} node={n} ink={ink} />
+            <InlineRun key={i} node={n} ink={ink} onOpenFile={onOpenFile} />
           ))}
         </Text>
       );
@@ -279,10 +306,49 @@ function InlineRun({ node, ink }: { node: InlineNode; ink: string }) {
           {node.text}
         </Text>
       );
+    case "filePath": {
+      // When no handler is wired, gracefully degrade to plain mono text —
+      // the path is still readable, it just isn't an affordance.
+      if (!onOpenFile) {
+        return (
+          <Text
+            style={{
+              fontFamily: "JetBrainsMono",
+              fontSize: 13,
+              color: tokens["text-primary"],
+            }}
+          >
+            {node.path}
+          </Text>
+        );
+      }
+      return (
+        <Text
+          onPress={() => onOpenFile(node.path)}
+          accessibilityRole="link"
+          accessibilityLabel={`Open ${node.path}`}
+          style={{
+            fontFamily: "JetBrainsMono",
+            fontSize: 13,
+            color: tokens["accent-default"],
+          }}
+        >
+          {node.path}
+        </Text>
+      );
+    }
   }
 }
 
-function InlineFlatten({ block, ink }: { block: Block; ink: string }) {
+function InlineFlatten({
+  block,
+  ink,
+  onOpenFile,
+}: {
+  block: Block;
+  ink: string;
+  onOpenFile?: (path: string) => void;
+}) {
   switch (block.type) {
     case "heading":
     case "paragraph":
@@ -290,7 +356,7 @@ function InlineFlatten({ block, ink }: { block: Block; ink: string }) {
       return (
         <>
           {block.nodes.map((n, i) => (
-            <InlineRun key={i} node={n} ink={ink} />
+            <InlineRun key={i} node={n} ink={ink} onOpenFile={onOpenFile} />
           ))}{" "}
         </>
       );
@@ -300,7 +366,12 @@ function InlineFlatten({ block, ink }: { block: Block; ink: string }) {
           {block.items.map((item, i) => (
             <>
               {item.map((n, j) => (
-                <InlineRun key={`${i}-${j}`} node={n} ink={ink} />
+                <InlineRun
+                  key={`${i}-${j}`}
+                  node={n}
+                  ink={ink}
+                  onOpenFile={onOpenFile}
+                />
               ))}
               {" · "}
             </>

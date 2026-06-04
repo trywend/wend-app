@@ -1,0 +1,329 @@
+/**
+ * Wend — AttachmentPicker.
+ *
+ * Bottom sheet with two options: Photo (expo-image-picker) and Document
+ * (expo-document-picker). On selection the caller receives an Attachment
+ * record (already copied into the per-note attachments dir) and is
+ * responsible for persisting it onto the note. Cancellation closes the
+ * sheet silently.
+ *
+ * Why a thin bottom sheet rather than reusing primitives/Sheet: this one is
+ * auto-height (two rows) and matches the visual cadence of NoteActionsSheet
+ * — single backdrop + slide-up panel without the InboxSheet drag-handle
+ * machinery, which would be overkill for two rows.
+ *
+ * NativeWind 4 + Pressable note: every Pressable here uses inline style for
+ * layout/colors. className stays out of function-form styles entirely — same
+ * gotcha as InboxSheet and the composer.
+ */
+
+import { useState } from "react";
+import { ActivityIndicator, Alert, Pressable, View } from "react-native";
+import Animated, {
+  FadeIn,
+  FadeOut,
+  SlideInDown,
+  SlideOutDown,
+} from "react-native-reanimated";
+import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
+import { FileIcon, ImageIcon } from "phosphor-react-native";
+
+import { Text } from "@/components/primitives";
+import { useTheme } from "@/theme/ThemeProvider";
+import {
+  copyAttachmentIntoNote,
+  type Attachment,
+} from "@/lib/attachments";
+
+export interface AttachmentPickerProps {
+  open: boolean;
+  onClose: () => void;
+  /** Note that owns the freshly-attached file. */
+  noteId: string;
+  /** Fired AFTER the file has been copied into the note's attachments dir. */
+  onAttached: (attachment: Attachment) => void;
+}
+
+// MIME types we accept for the Document path. We pass the catch-all wildcard
+// (asterisk slash asterisk) here rather than a narrowed list because some
+// Android pickers silently filter to a single category if any specific type
+// is passed. Renderer-level support is handled in FileViewerModal.
+const DOC_MIME_TYPES = "*/*";
+
+export function AttachmentPicker(props: AttachmentPickerProps) {
+  if (!props.open) return null;
+  return <Mounted {...props} />;
+}
+
+function Mounted({
+  onClose,
+  noteId,
+  onAttached,
+}: AttachmentPickerProps) {
+  const { tokens } = useTheme();
+  const [busy, setBusy] = useState(false);
+
+  const surface = tokens["surface-elevated"];
+  const border = tokens["border-hairline"];
+  const ink = tokens["text-primary"];
+  const subtle = tokens["text-secondary"];
+  const tertiary = tokens["text-tertiary"];
+  const accent = tokens["accent-default"];
+  const chipBg = tokens["surface-chip"];
+
+  async function pickImage() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      // Permission first — iOS requires it for the limited-library API even
+      // though the modern picker is technically permissionless. Cheap
+      // belt-and-braces.
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (perm.status !== "granted") {
+        Alert.alert(
+          "Photos access needed",
+          "Wend needs access to your photo library to attach images. You can enable it in Settings.",
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsMultipleSelection: false,
+        quality: 0.92,
+        // expo-image-picker copies the file into a cache directory by default —
+        // we re-copy in copyAttachmentIntoNote so cache eviction doesn't take
+        // the attachment with it.
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0]!;
+      const meta = await copyAttachmentIntoNote({
+        noteId,
+        sourceUri: asset.uri,
+        name: asset.fileName ?? null,
+        mimeType: asset.mimeType ?? "image/jpeg",
+        sizeBytes: asset.fileSize ?? null,
+      });
+      onAttached(meta);
+      onClose();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[AttachmentPicker] image pick failed:", err);
+      Alert.alert("Couldn't attach photo", "Something went wrong reading the file. Try again?");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function pickDocument() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: DOC_MIME_TYPES,
+        multiple: false,
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const asset = result.assets[0]!;
+      const meta = await copyAttachmentIntoNote({
+        noteId,
+        sourceUri: asset.uri,
+        name: asset.name,
+        mimeType: asset.mimeType ?? "application/octet-stream",
+        sizeBytes: asset.size ?? null,
+      });
+      onAttached(meta);
+      onClose();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[AttachmentPicker] document pick failed:", err);
+      Alert.alert(
+        "Couldn't attach file",
+        "Something went wrong reading the file. Try again?",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <View
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 65,
+      }}
+      pointerEvents="box-none"
+    >
+      <Animated.View
+        entering={FadeIn.duration(180)}
+        exiting={FadeOut.duration(140)}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: "rgba(0,0,0,0.22)",
+        }}
+      >
+        <Pressable
+          onPress={busy ? undefined : onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Close attachment picker"
+          style={{ flex: 1 }}
+        />
+      </Animated.View>
+
+      <Animated.View
+        entering={SlideInDown.duration(220)}
+        exiting={SlideOutDown.duration(180)}
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: surface,
+          borderTopLeftRadius: 28,
+          borderTopRightRadius: 28,
+          borderWidth: 1,
+          borderColor: border,
+          paddingTop: 12,
+          paddingBottom: 32,
+          paddingHorizontal: 20,
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: -8 },
+          shadowOpacity: 0.1,
+          shadowRadius: 24,
+          elevation: 10,
+        }}
+      >
+        <View
+          style={{
+            width: 36,
+            height: 4,
+            borderRadius: 999,
+            backgroundColor: tertiary,
+            alignSelf: "center",
+            marginBottom: 12,
+          }}
+        />
+
+        <Text
+          variant="title"
+          style={{ color: ink, marginBottom: 4, paddingHorizontal: 4 }}
+        >
+          Attach to note
+        </Text>
+        <Text
+          variant="meta"
+          style={{ color: subtle, marginBottom: 16, paddingHorizontal: 4 }}
+        >
+          Files stay on this phone — Claude doesn't read them yet.
+        </Text>
+
+        <PickerRow
+          label="Photo"
+          subtitle="From your library"
+          icon={<ImageIcon size={22} color={accent} weight="regular" />}
+          onPress={pickImage}
+          disabled={busy}
+          chipBg={chipBg}
+          border={border}
+          ink={ink}
+          subtle={subtle}
+        />
+        <PickerRow
+          label="Document"
+          subtitle="PDF, DOCX, TXT, MD…"
+          icon={<FileIcon size={22} color={accent} weight="regular" />}
+          onPress={pickDocument}
+          disabled={busy}
+          chipBg={chipBg}
+          border={border}
+          ink={ink}
+          subtle={subtle}
+        />
+
+        {busy ? (
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              marginTop: 12,
+            }}
+          >
+            <ActivityIndicator color={subtle} />
+            <Text variant="meta" style={{ color: subtle }}>
+              Copying…
+            </Text>
+          </View>
+        ) : null}
+      </Animated.View>
+    </View>
+  );
+}
+
+interface PickerRowProps {
+  label: string;
+  subtitle: string;
+  icon: React.ReactNode;
+  onPress: () => void;
+  disabled: boolean;
+  chipBg: string;
+  border: string;
+  ink: string;
+  subtle: string;
+}
+
+function PickerRow(props: PickerRowProps) {
+  return (
+    <Pressable
+      onPress={props.disabled ? undefined : props.onPress}
+      accessibilityRole="button"
+      accessibilityLabel={props.label}
+      accessibilityState={{ disabled: props.disabled }}
+      style={({ pressed }) => ({
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 14,
+        paddingHorizontal: 14,
+        paddingVertical: 14,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: props.border,
+        backgroundColor: pressed ? props.chipBg : "transparent",
+        opacity: props.disabled ? 0.5 : 1,
+        marginBottom: 10,
+      })}
+    >
+      <View
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: 20,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: props.chipBg,
+        }}
+      >
+        {props.icon}
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text variant="body-em" style={{ color: props.ink }}>
+          {props.label}
+        </Text>
+        <Text variant="meta" style={{ color: props.subtle }}>
+          {props.subtitle}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}

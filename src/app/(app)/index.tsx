@@ -28,11 +28,12 @@
  * Every Pressable in this file uses inline `style` for layout — className
  * only for static, non-layout properties.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Animated as RNAnimated,
   Easing,
+  Image as RNImage,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -71,8 +72,15 @@ import {
   archiveNote,
   createNote,
   deleteNote,
+  getNote,
+  saveNote,
   type PersistedRun,
 } from "@/lib/notes-storage";
+import {
+  classifyAttachment,
+  removeAttachmentFile,
+  type Attachment,
+} from "@/lib/attachments";
 import { useAuthStore } from "@/store/authSlice";
 import { useDaemonStore } from "@/store/daemonSlice";
 import { useOnboardingStore } from "@/store/onboardingSlice";
@@ -85,6 +93,8 @@ import { IntegrationsSheet } from "@/components/IntegrationsSheet";
 import { ConnectGitHubSheet } from "@/components/ConnectGitHubSheet";
 import { ConnectMacSheet } from "@/components/ConnectMacSheet";
 import { NoteActionsSheet } from "@/components/NoteActionsSheet";
+import { AttachmentPicker } from "@/components/AttachmentPicker";
+import { FileViewerModal } from "@/components/FileViewerModal";
 import { HealthDot } from "@/components/HealthDot";
 import {
   AgentRunBlock,
@@ -154,6 +164,21 @@ export default function HomeScreen() {
     id: string;
     title: string;
   } | null>(null);
+  // Attachment composer state. We don't go through useNoteEditor for this —
+  // that hook is owned by a parallel agent and its setter shape would have
+  // to grow. Attachments are loaded directly via getNote when the current
+  // note resolves; mutations call saveNote({attachments}) and update local
+  // state. Volume is tiny (a few entries per note) so the extra round-trip
+  // through AsyncStorage is fine.
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
+  const [fileViewer, setFileViewer] = useState<{
+    open: boolean;
+    path: string;
+    mimeType?: string;
+    name?: string;
+    sizeBytes?: number;
+  }>({ open: false, path: "" });
   const signOut = useSignOut();
   const [coachmarkVisible, setCoachmarkVisible] = useState(false);
   const { dispatch, running, cancel, isConfigured: daemonConfigured } =
@@ -193,6 +218,62 @@ export default function HomeScreen() {
   useEffect(() => {
     if (!hasContent && chipDismissed) setChipDismissed(false);
   }, [hasContent, chipDismissed]);
+
+  /* ─── Attachments: sync local state with persisted note ─────────────── */
+  useEffect(() => {
+    if (!resolvedNoteId) {
+      setAttachments([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await getNote(resolvedNoteId);
+        if (cancelled) return;
+        setAttachments(result?.note.attachments ?? []);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("[wend] load attachments failed:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedNoteId]);
+
+  async function persistAttachments(next: Attachment[]) {
+    setAttachments(next);
+    if (!resolvedNoteId) return;
+    try {
+      await saveNote({ id: resolvedNoteId, attachments: next });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[wend] save attachments failed:", err);
+    }
+  }
+
+  async function handleAttachmentAdded(att: Attachment) {
+    const next = [...attachments, att];
+    await persistAttachments(next);
+  }
+
+  async function handleAttachmentRemove(att: Attachment) {
+    const next = attachments.filter((a) => a.id !== att.id);
+    await persistAttachments(next);
+    // Best-effort cleanup — we don't surface an error if the unlink fails
+    // because the metadata is already gone and the orphaned file is harmless.
+    void removeAttachmentFile(att.localUri);
+  }
+
+  function handleAttachmentOpen(att: Attachment) {
+    setFileViewer({
+      open: true,
+      path: att.localUri,
+      mimeType: att.mimeType,
+      name: att.name,
+      sizeBytes: att.sizeBytes,
+    });
+  }
 
   /* ─── First-note coachmark gating ─────────────────────────────────── */
   useEffect(() => {
@@ -706,6 +787,18 @@ export default function HomeScreen() {
             }}
           />
 
+          {attachments.length > 0 ? (
+            <AttachmentStrip
+              attachments={attachments}
+              borderColor={borderColor}
+              chipBg={surfaceChip}
+              ink={inkColor}
+              subtle={subtleColor}
+              onOpen={handleAttachmentOpen}
+              onRemove={handleAttachmentRemove}
+            />
+          ) : null}
+
           <Pressable
             style={{ minHeight: 80 }}
             onPress={() => bodyRef.current?.focus()}
@@ -768,6 +861,9 @@ export default function HomeScreen() {
                     ? () => handleRetry(idx, run)
                     : undefined
                 }
+                onOpenFile={(path) =>
+                  setFileViewer({ open: true, path })
+                }
               />
               <FollowUpInput
                 value={run.followUp}
@@ -814,6 +910,7 @@ export default function HomeScreen() {
               state={inflightToBlockState(inflight)}
               onStop={handleStop}
               projectName={inflight.routeName || projectBasename(noteCwd)}
+              onOpenFile={(path) => setFileViewer({ open: true, path })}
             />
           ) : null}
         </ScrollView>
@@ -992,10 +1089,18 @@ export default function HomeScreen() {
               />
               <ToolbarButton
                 onPress={() => {
-                  /* Attach not wired yet. */
+                  if (!resolvedNoteId) return;
+                  Keyboard.dismiss();
+                  setAttachmentPickerOpen(true);
                 }}
                 accessibilityLabel="Attach file"
-                icon={<PaperclipIcon size={22} color={subtleColor} weight="regular" />}
+                icon={
+                  <PaperclipIcon
+                    size={22}
+                    color={attachments.length > 0 ? accent : subtleColor}
+                    weight={attachments.length > 0 ? "fill" : "regular"}
+                  />
+                }
               />
             </View>
 
@@ -1162,6 +1267,28 @@ export default function HomeScreen() {
         onClose={() => setCommandPaletteOpen(false)}
         onSelectNote={handleSelectNote}
         runs={runs}
+      />
+
+      {/* Attachment picker — bottom sheet with Photo / Document options. */}
+      <AttachmentPicker
+        open={attachmentPickerOpen}
+        onClose={() => setAttachmentPickerOpen(false)}
+        noteId={resolvedNoteId}
+        onAttached={(att) => {
+          void handleAttachmentAdded(att);
+        }}
+      />
+
+      {/* File viewer — opens for attachment chips AND for tappable file
+          paths in agent responses. Mounted last so its zIndex (90) stacks
+          above every other sheet. */}
+      <FileViewerModal
+        open={fileViewer.open}
+        onClose={() => setFileViewer((s) => ({ ...s, open: false }))}
+        path={fileViewer.path}
+        mimeType={fileViewer.mimeType}
+        name={fileViewer.name}
+        sizeBytes={fileViewer.sizeBytes}
       />
 
       {/* Note actions — long-press a card to open. Auto-height. */}
@@ -1336,6 +1463,125 @@ function FollowUpInput(props: {
         </Pressable>
       ) : null}
     </View>
+  );
+}
+
+/**
+ * Horizontal scroll of 56×56 attachment chips. Image chips render the file
+ * inline; non-image chips show a small file glyph + extension. Tap opens
+ * the viewer; long-press removes (after a confirm).
+ */
+function AttachmentStrip(props: {
+  attachments: Attachment[];
+  borderColor: string;
+  chipBg: string;
+  ink: string;
+  subtle: string;
+  onOpen: (att: Attachment) => void;
+  onRemove: (att: Attachment) => void;
+}) {
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={{ gap: 8, paddingBottom: 12 }}
+      keyboardShouldPersistTaps="handled"
+    >
+      {props.attachments.map((att) => (
+        <AttachmentChip
+          key={att.id}
+          attachment={att}
+          borderColor={props.borderColor}
+          chipBg={props.chipBg}
+          ink={props.ink}
+          subtle={props.subtle}
+          onOpen={() => props.onOpen(att)}
+          onRemove={() => props.onRemove(att)}
+        />
+      ))}
+    </ScrollView>
+  );
+}
+
+function AttachmentChip(props: {
+  attachment: Attachment;
+  borderColor: string;
+  chipBg: string;
+  ink: string;
+  subtle: string;
+  onOpen: () => void;
+  onRemove: () => void;
+}) {
+  const { attachment } = props;
+  const kind = useMemo(
+    () => classifyAttachment(attachment.mimeType, attachment.name),
+    [attachment.mimeType, attachment.name],
+  );
+  const extLabel = useMemo(() => {
+    const dot = attachment.name.lastIndexOf(".");
+    if (dot === -1) return "FILE";
+    return attachment.name.slice(dot + 1).slice(0, 4).toUpperCase();
+  }, [attachment.name]);
+
+  function confirmRemove() {
+    Alert.alert(
+      "Remove attachment?",
+      attachment.name,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: props.onRemove,
+        },
+      ],
+      { cancelable: true },
+    );
+  }
+
+  return (
+    <Pressable
+      onPress={props.onOpen}
+      onLongPress={confirmRemove}
+      accessibilityRole="button"
+      accessibilityLabel={`Attachment ${attachment.name}`}
+      style={({ pressed }) => ({
+        width: 56,
+        height: 56,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: props.borderColor,
+        backgroundColor: props.chipBg,
+        overflow: "hidden",
+        alignItems: "center",
+        justifyContent: "center",
+        opacity: pressed ? 0.8 : 1,
+      })}
+    >
+      {kind === "image" ? (
+        <RNImage
+          source={{ uri: attachment.localUri }}
+          style={{ width: "100%", height: "100%" }}
+          resizeMode="cover"
+        />
+      ) : (
+        <>
+          <PaperclipIcon size={18} color={props.subtle} weight="regular" />
+          <Text
+            style={{
+              fontFamily: "JetBrainsMono-Medium",
+              fontSize: 9,
+              color: props.subtle,
+              marginTop: 2,
+              letterSpacing: 0.4,
+            }}
+            numberOfLines={1}
+          >
+            {extLabel}
+          </Text>
+        </>
+      )}
+    </Pressable>
   );
 }
 

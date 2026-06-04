@@ -381,10 +381,6 @@ export function AgentRunBlock({
                 paddingBottom: errored || (done && state.costUsd === 0 && state.durationMs === 0) ? 14 : 6,
               }}
             >
-              {/* onOpenFile is threaded for the upcoming clickable-file-paths
-               *  work in Markdown.tsx (owned by another agent). Suppress
-               *  until they land the prop on MarkdownProps. */}
-              {/* @ts-expect-error — Markdown.onOpenFile lands in a sibling PR */}
               <Markdown blocks={blocks} onOpenFile={onOpenFile} />
               {running ? (
                 <RNAnimated.Text

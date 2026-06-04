@@ -41,7 +41,16 @@
         {
           "cameraPermission": "Wend needs camera access to scan the pairing QR code from your Mac."
         }
-      ]
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Wend needs access to your photo library to attach images to a note.",
+          "cameraPermission": "Wend needs camera access so you can attach a photo to a note."
+        }
+      ],
+      "expo-document-picker",
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true,

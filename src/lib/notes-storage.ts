@@ -46,6 +46,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Crypto from "expo-crypto";
 
+import type { Attachment } from "./attachments";
+
 /* ===========================================================================
    TYPES — plain client shapes, no Drizzle/Neon imports.
    =========================================================================== */
@@ -66,6 +68,13 @@ export interface Note {
   createdAt: number;
   updatedAt: number;
   archivedAt: number | null;
+  /**
+   * Local-only attachments (v1). Bytes live in
+   * `Paths.document/wend-attachments/<noteId>/`; this list is just the
+   * metadata so we can re-render chips and resolve the file later. Defaults
+   * to an empty array — older persisted notes get backfilled on read.
+   */
+  attachments?: Attachment[];
 }
 
 /**
@@ -217,6 +226,7 @@ function makeEmptyNote(userId: string): Note {
     createdAt: now,
     updatedAt: now,
     archivedAt: null,
+    attachments: [],
   };
 }
 
@@ -237,6 +247,9 @@ function normalizeNote(raw: unknown): Note | null {
     createdAt: typeof n.createdAt === "number" ? n.createdAt : Date.now(),
     updatedAt: typeof n.updatedAt === "number" ? n.updatedAt : Date.now(),
     archivedAt: typeof n.archivedAt === "number" ? n.archivedAt : null,
+    attachments: Array.isArray(n.attachments)
+      ? (n.attachments as Attachment[])
+      : [],
   };
 }
 
@@ -315,10 +328,11 @@ export async function saveNote(args: {
   bodyText?: string;
   runs?: PersistedRun[];
   cwd?: string | null;
+  attachments?: Attachment[];
 }): Promise<void> {
-  const { id, title, bodyText, runs, cwd } = args;
+  const { id, title, bodyText, runs, cwd, attachments } = args;
 
-  // Update index (title + cwd + updatedAt). One read-modify-write per save.
+  // Update index (title + cwd + attachments + updatedAt). One read-modify-write per save.
   const all = await readIndex();
   const idx = all.findIndex((n) => n.id === id);
   if (idx === -1) {
@@ -330,6 +344,8 @@ export async function saveNote(args: {
     ...prev,
     title: title !== undefined ? title : prev.title,
     cwd: cwd !== undefined ? cwd : prev.cwd,
+    attachments:
+      attachments !== undefined ? attachments : prev.attachments ?? [],
     updatedAt: Date.now(),
   };
   all[idx] = next;

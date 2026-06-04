@@ -26,7 +26,86 @@ export type InlineNode =
   | { type: "bold"; nodes: InlineNode[] }
   | { type: "italic"; nodes: InlineNode[] }
   | { type: "code"; text: string }
-  | { type: "link"; text: string; href: string };
+  | { type: "link"; text: string; href: string }
+  /**
+   * File path referenced in agent prose (e.g. `src/foo.ts`, `/Users/foo/bar.swift`).
+   * Detected by {@link parseInline} via a conservative heuristic that requires
+   * a file-shaped extension and at least one slash so plain ".tsx" tokens
+   * don't get hijacked. The renderer turns these into tappable mono spans
+   * that fire `onOpenFile(path)`.
+   */
+  | { type: "filePath"; path: string };
+
+/**
+ * Extensions we recognize as file paths. Conservative on purpose — anything
+ * we miss just falls back to plain text, which is fine. The opposite (a
+ * false positive making prose into a tappable nonsense link) is worse.
+ */
+const FILE_PATH_EXTENSIONS = new Set([
+  "ts",
+  "tsx",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+  "swift",
+  "py",
+  "rs",
+  "go",
+  "java",
+  "kt",
+  "kts",
+  "c",
+  "cc",
+  "cpp",
+  "h",
+  "hpp",
+  "m",
+  "mm",
+  "rb",
+  "php",
+  "md",
+  "mdx",
+  "json",
+  "yaml",
+  "yml",
+  "toml",
+  "sh",
+  "bash",
+  "zsh",
+  "html",
+  "css",
+  "scss",
+  "sql",
+  "txt",
+  "log",
+  "lock",
+  "xml",
+  "plist",
+  "gradle",
+  "podspec",
+]);
+
+/**
+ * @internal — exported for tests. Returns true if `s` looks like a file path
+ * we want to make tappable. Conservative: requires at least one `/` and a
+ * known extension, and refuses URLs.
+ */
+export function looksLikeFilePath(s: string): boolean {
+  if (!s) return false;
+  // Strip URLs first — never hijack an http(s) link.
+  if (/^https?:\/\//i.test(s)) return false;
+  // Must contain a slash.
+  if (!s.includes("/")) return false;
+  // Must have an extension we know about.
+  const dot = s.lastIndexOf(".");
+  if (dot === -1 || dot === s.length - 1) return false;
+  const ext = s.slice(dot + 1).toLowerCase();
+  // Strip a trailing punctuation char if present (e.g. trailing `.` was the
+  // extension dot — already handled — but `foo.ts,` shouldn't happen because
+  // the outer regex's lookahead excludes those).
+  return FILE_PATH_EXTENSIONS.has(ext);
+}
 
 /**
  * Parse a (possibly partial) markdown string into a block list. Safe to
@@ -241,6 +320,47 @@ export function parseInline(input: string): InlineNode[] {
           i = close + 1;
           continue;
         }
+      }
+    }
+
+    // File path detection. Only at a word-start position (start of input, or
+    // after whitespace / opening bracket). Cheap to skip otherwise so this
+    // doesn't tank the whole inline loop.
+    if (
+      (ch === "/" ||
+        ch === "~" ||
+        ch === "." ||
+        (/[A-Za-z0-9_]/.test(ch) &&
+          (i === 0 || /[\s([{`"']/.test(input[i - 1]!))))
+    ) {
+      // Greedy match — walk forward across path-character runs and capture
+      // the longest substring that still satisfies looksLikeFilePath().
+      let j = i;
+      while (j < input.length && /[A-Za-z0-9_./~-]/.test(input[j]!)) j += 1;
+      // Trim trailing punctuation that path-chars consumed but shouldn't be
+      // part of the path (a dot at the end always belongs to the extension,
+      // never a sentence terminator — but a comma can't have leaked in
+      // since it's not in the char class). For safety, also peel trailing
+      // dot/dash that look like punctuation.
+      let end = j;
+      while (end > i && (input[end - 1] === "." || input[end - 1] === "-")) {
+        // Keep the dot if it's part of an extension (preceded by alnum and
+        // followed by alnum — but we've already consumed forward). The
+        // simplest rule: if peeling the dot still leaves a recognized path,
+        // peel it. Otherwise keep it (extension dot).
+        const candidate = input.slice(i, end - 1);
+        if (looksLikeFilePath(candidate)) {
+          end -= 1;
+        } else {
+          break;
+        }
+      }
+      const candidate = input.slice(i, end);
+      if (end > i && looksLikeFilePath(candidate)) {
+        flush();
+        out.push({ type: "filePath", path: candidate });
+        i = end;
+        continue;
       }
     }
 
