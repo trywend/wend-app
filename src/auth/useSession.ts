@@ -13,9 +13,10 @@ import { useAuth, useUser } from "@clerk/clerk-expo";
 
 import { useAuthStore } from "@/store/authSlice";
 import { isClerkConfigured } from "@/config/env";
+import { ensurePushNotificationsRegistered } from "@/lib/notifications";
 
 function useSessionBootstrapWithClerk() {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, getToken } = useAuth();
   const { user } = useUser();
   const setSession = useAuthStore((s) => s.setSession);
   const setLoading = useAuthStore((s) => s.setLoading);
@@ -31,10 +32,19 @@ function useSessionBootstrapWithClerk() {
         email: user.primaryEmailAddress?.emailAddress ?? "",
         name: user.fullName,
       });
+
+      // Fire-and-forget push token registration. Never throws — handles
+      // missing expo-notifications module, denied permission, and network
+      // errors internally. Re-running on every session render is fine: the
+      // notificationsSlice short-circuits when token + userId are stable.
+      void ensurePushNotificationsRegistered({
+        userId: user.id,
+        getToken: () => getToken(),
+      });
     } else {
       setSession(null);
     }
-  }, [isLoaded, isSignedIn, user, setSession, setLoading]);
+  }, [isLoaded, isSignedIn, user, setSession, setLoading, getToken]);
 }
 
 function useSessionBootstrapWithoutClerk() {
