@@ -48,7 +48,20 @@ import Animated, {
   Extrapolation,
 } from "react-native-reanimated";
 import { Image } from "expo-image";
-import * as Sharing from "expo-sharing";
+// expo-sharing is newly added in this release; lazy-require so a stale
+// dev client doesn't crash the (app) route at module-eval time. Same
+// pattern as expo-image-picker in AttachmentPicker and expo-camera in
+// ConnectMacSheet. When missing, share buttons fall back to RN's
+// built-in Share API (already imported).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let Sharing: any = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  Sharing = require("expo-sharing");
+} catch {
+  Sharing = null;
+}
+const sharingAvailable = Boolean(Sharing);
 import {
   ClipboardTextIcon,
   ShareNetworkIcon,
@@ -176,15 +189,20 @@ function Mounted({
   async function handleShare() {
     try {
       if (isLocalUri(path)) {
-        const ok = await Sharing.isAvailableAsync();
-        if (ok) {
-          await Sharing.shareAsync(path, {
-            mimeType,
-            dialogTitle: displayName,
-          });
-        } else {
-          await Share.share({ url: path, title: displayName });
+        // Prefer expo-sharing when available (better mime handling on
+        // iOS); fall back to RN's built-in Share API when the native
+        // module isn't linked into the dev client yet.
+        if (sharingAvailable) {
+          const ok = await Sharing.isAvailableAsync();
+          if (ok) {
+            await Sharing.shareAsync(path, {
+              mimeType,
+              dialogTitle: displayName,
+            });
+            return;
+          }
         }
+        await Share.share({ url: path, title: displayName });
         return;
       }
       // Mac / remote path — share as text (the path string) so the user can

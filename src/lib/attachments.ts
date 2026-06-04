@@ -18,7 +18,39 @@
  */
 
 import * as Crypto from "expo-crypto";
-import { Directory, File, Paths } from "expo-file-system";
+
+// expo-file-system was newly added in this release; lazy-require so a
+// stale dev client (built before this dep was linked) doesn't crash the
+// whole bundle at module-eval time — same pattern as expo-image-picker
+// in AttachmentPicker. When the native module is missing, the type
+// aliases below resolve to `any` and the public API functions throw a
+// clear error at call time. The AttachmentPicker already short-circuits
+// with a "rebuild the dev client" alert before reaching the file ops,
+// so this is the last-line safety net.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let FS: any = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  FS = require("expo-file-system");
+} catch {
+  FS = null;
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const Directory: any = FS?.Directory;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const File: any = FS?.File;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const Paths: any = FS?.Paths;
+export const fileSystemAvailable = Boolean(Directory && File && Paths);
+
+function assertFS(): void {
+  if (!fileSystemAvailable) {
+    throw new Error(
+      "expo-file-system isn't linked into this dev client. Rebuild with " +
+        "`npx eas-cli build --profile development --platform android` and reinstall.",
+    );
+  }
+}
 
 /* ===========================================================================
    TYPES
@@ -51,7 +83,9 @@ const ATTACHMENTS_DIRNAME = "wend-attachments";
  * Creates intermediate directories when missing — idempotent so callers can
  * fire and forget on every save.
  */
-function ensureNoteDir(noteId: string): Directory {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ensureNoteDir(noteId: string): any {
+  assertFS();
   const root = new Directory(Paths.document, ATTACHMENTS_DIRNAME);
   if (!root.exists) {
     root.create({ intermediates: true });
@@ -161,6 +195,7 @@ export async function copyAttachmentIntoNote(args: {
  * is the caller's responsibility — we don't touch the notes store from here.
  */
 export async function removeAttachmentFile(uri: string): Promise<boolean> {
+  if (!fileSystemAvailable) return false;
   try {
     const f = new File(uri);
     if (f.exists) {
@@ -301,6 +336,7 @@ export async function readTextFile(
   uri: string,
   maxBytes = 200 * 1024,
 ): Promise<string | null> {
+  if (!fileSystemAvailable) return null;
   try {
     const f = new File(uri);
     if (!f.exists) return null;
