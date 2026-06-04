@@ -74,6 +74,8 @@ import {
   type PersistedRun,
 } from "@/lib/notes-storage";
 import { useAuthStore } from "@/store/authSlice";
+import { useDaemonStore } from "@/store/daemonSlice";
+import { useOnboardingStore } from "@/store/onboardingSlice";
 import { useSignOut } from "@/auth/client";
 import { Text } from "@/components/primitives";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -541,9 +543,16 @@ export default function HomeScreen() {
   /* ─── Sign out ─────────────────────────────────────────────────────── */
   async function handleSignOut() {
     try {
+      // Wipe the per-user local state BEFORE we drop the Clerk session.
+      // Order matters: AuthGate watches Clerk and will re-route to
+      // /(auth)/sign-in as soon as signOut() resolves; if we clear the
+      // daemon+onboarding stores after that race, a brief frame of
+      // unauthed-but-still-paired state can flash. Clearing first means
+      // the next user (or the same user signing back in) gets a clean
+      // pairing flow from scratch.
+      useDaemonStore.getState().clear();
+      useOnboardingStore.getState().reset();
       await signOut();
-      // AuthGate will route to /(auth)/sign-in when Clerk fires the session
-      // change; no explicit navigation needed.
     } catch (err) {
       // eslint-disable-next-line no-console
       console.warn("[wend] sign-out failed", err);
