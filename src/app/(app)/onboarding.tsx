@@ -1,24 +1,23 @@
 /**
  * Wend — pair-your-Mac onboarding screen.
  *
- * Sits between sign-in and the notes app. Walks a fresh user through
- * pairing their Mac so the very first dispatch they ever send actually
- * goes somewhere. Skippable for users who want to explore the app
- * first; (app)/_layout.tsx remembers the skip and doesn't re-prompt.
+ * Sits between sign-in and the notes app. Design matches the
+ * mockup in `~/Desktop/Wend/Screen Spec.md` follow-ups:
  *
- * Composition:
- *   1. Hero — Wend logo + welcome copy.
- *   2. "Connect your Mac" primary CTA — opens ConnectMacSheet.
- *   3. "I'll do this later" subtle skip link — sets onboarding.pairSkipped
- *      and routes to the notes home.
+ *   - Centered W mark at top
+ *   - "Welcome to Wend." headline + one-sentence pitch
+ *   - Decorative card (laptop glyph + connection-dot animation) on
+ *     paper-grain canvas with soft elevation
+ *   - Primary CTA pill "Connect your Mac" (with QR icon)
+ *   - Underline link "I'll connect my Mac later"
  *
- * Auto-routes to /(app) the instant deviceId+token appear in the daemon
- * store — i.e., the moment the user finishes scanning the QR or typing
- * the OTP in the embedded sheet.
+ * Auto-routes to /(app) the instant deviceId+token appear in the
+ * daemon store — i.e., as soon as the user finishes the embedded
+ * ConnectMacSheet's QR scan or OTP entry.
  */
 
-import { useEffect, useState } from "react";
-import { Pressable, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Pressable, View, Animated as RNAnimated } from "react-native";
 import { useRouter } from "expo-router";
 import Animated, {
   FadeIn,
@@ -50,15 +49,11 @@ export default function OnboardingScreen() {
     markFirstShown();
   }, [markFirstShown]);
 
-  // The moment pairing completes, drop the user into the notes app.
-  // The ConnectMacSheet writes deviceId+token+host into the daemon
-  // store on success; this effect catches that and routes.
+  // Auto-route to notes when pairing completes. 800ms gives the sheet's
+  // success state a beat before we leave.
   useEffect(() => {
     if (paired) {
-      // Small delay so the sheet's success animation has a beat to play.
-      const t = setTimeout(() => {
-        router.replace("/(app)");
-      }, 800);
+      const t = setTimeout(() => router.replace("/(app)"), 800);
       return () => clearTimeout(t);
     }
   }, [paired, router]);
@@ -82,38 +77,62 @@ export default function OnboardingScreen() {
       style={{
         flex: 1,
         backgroundColor: canvas,
-        paddingHorizontal: 28,
-        paddingTop: 80,
-        paddingBottom: 48,
+        paddingHorizontal: 24,
+        paddingTop: 64,
+        paddingBottom: 36,
       }}
     >
-      {/* Top: brand mark */}
-      <Animated.View entering={FadeIn.duration(260)}>
-        <WendMark height={32} inkColor={ink} />
+      {/* Brand mark — centered */}
+      <Animated.View
+        entering={FadeIn.duration(280)}
+        style={{ alignItems: "center", marginBottom: 32 }}
+      >
+        <View
+          style={{
+            width: 56,
+            height: 56,
+            borderRadius: 14,
+            backgroundColor: accent,
+            alignItems: "center",
+            justifyContent: "center",
+            shadowColor: accent,
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.25,
+            shadowRadius: 16,
+          }}
+        >
+          <WendMark height={28} inkColor="#FFFFFF" />
+        </View>
       </Animated.View>
 
-      {/* Middle: welcome copy + status card */}
-      <View style={{ flex: 1, justifyContent: "center" }}>
-        <Animated.View entering={FadeInDown.delay(80).duration(280)}>
+      {/* Welcome copy + card */}
+      <View style={{ flex: 1, justifyContent: "flex-start" }}>
+        <Animated.View
+          entering={FadeInDown.delay(60).duration(280)}
+          style={{ alignItems: "center", marginBottom: 32 }}
+        >
           <Text
             style={{
               fontFamily: "Inter-Bold",
-              fontSize: 30,
-              lineHeight: 36,
+              fontSize: 32,
+              lineHeight: 38,
               letterSpacing: -0.6,
               color: ink,
+              textAlign: "center",
             }}
           >
             Welcome to Wend.
           </Text>
           <Text
             style={{
-              marginTop: 14,
+              marginTop: 12,
               fontFamily: "Inter-Regular",
-              fontSize: 16,
-              lineHeight: 24,
+              fontSize: 15.5,
+              lineHeight: 23,
               letterSpacing: -0.1,
               color: subtle,
+              textAlign: "center",
+              maxWidth: 320,
             }}
           >
             Notes you can send. Drop a thought from your phone and your Mac
@@ -122,98 +141,92 @@ export default function OnboardingScreen() {
           </Text>
         </Animated.View>
 
-        {/* Status card — changes based on pairing state */}
+        {/* Decorative card */}
         <Animated.View
-          entering={FadeInDown.delay(180).duration(300)}
+          entering={FadeInDown.delay(140).duration(320)}
           style={{
-            marginTop: 32,
             backgroundColor: elev,
-            borderRadius: 16,
+            borderRadius: 20,
             borderWidth: 1,
             borderColor: border,
-            padding: 20,
+            padding: 22,
+            shadowColor: accent,
+            shadowOpacity: 0.04,
+            shadowOffset: { width: 0, height: 20 },
+            shadowRadius: 40,
+            elevation: 3,
           }}
         >
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 12,
-            }}
-          >
-            <View
+          <DecorativePanel
+            paired={paired}
+            host={host}
+            accent={accent}
+            canvas={canvas}
+            border={border}
+          />
+          <View style={{ alignItems: "center", marginTop: 18 }}>
+            <Text
               style={{
-                width: 40,
-                height: 40,
-                borderRadius: 10,
-                alignItems: "center",
-                justifyContent: "center",
-                backgroundColor: `${accent}14`,
+                fontFamily: "Inter-SemiBold",
+                fontSize: 18,
+                color: ink,
+                letterSpacing: -0.2,
               }}
             >
-              <LaptopIcon size={22} color={accent} weight="regular" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text
-                style={{
-                  fontFamily: "Inter-SemiBold",
-                  fontSize: 14.5,
-                  color: ink,
-                  letterSpacing: -0.1,
-                }}
-              >
-                {paired ? `Paired with ${host}` : "Connect your Mac"}
-              </Text>
-              <Text
-                style={{
-                  marginTop: 2,
-                  fontFamily: "Inter-Regular",
-                  fontSize: 12.5,
-                  lineHeight: 18,
-                  color: subtle,
-                }}
-              >
-                {paired
-                  ? "You're ready. Heading to your notes…"
-                  : "Open Wend.app on your Mac, then scan the QR or type the 6-digit code."}
-              </Text>
-            </View>
+              {paired ? `Paired with ${host}` : "Connect your Mac"}
+            </Text>
+            <Text
+              style={{
+                marginTop: 4,
+                fontFamily: "Inter-Regular",
+                fontSize: 13,
+                color: subtle,
+                textAlign: "center",
+              }}
+            >
+              {paired
+                ? "You're set. Heading to your notes…"
+                : "Sync seamlessly with the desktop companion."}
+            </Text>
           </View>
         </Animated.View>
       </View>
 
       {/* Bottom: CTAs */}
-      <Animated.View entering={FadeInDown.delay(260).duration(300)}>
+      <Animated.View
+        entering={FadeInDown.delay(220).duration(300)}
+        style={{ marginTop: 24 }}
+      >
         <Pressable
           onPress={() => setSheetOpen(true)}
           accessibilityRole="button"
           accessibilityLabel="Connect your Mac"
           disabled={paired}
           style={({ pressed }) => ({
-            opacity: paired ? 0.5 : pressed ? 0.85 : 1,
+            opacity: paired ? 0.5 : pressed ? 0.88 : 1,
           })}
         >
           <View
             style={{
-              height: 56,
-              borderRadius: 28,
+              height: 60,
+              borderRadius: 16,
               backgroundColor: accent,
               alignItems: "center",
               justifyContent: "center",
               flexDirection: "row",
-              gap: 8,
-              shadowColor: "#000",
-              shadowOpacity: 0.12,
-              shadowRadius: 12,
-              shadowOffset: { width: 0, height: 4 },
-              elevation: 4,
+              gap: 10,
+              shadowColor: accent,
+              shadowOpacity: 0.25,
+              shadowRadius: 16,
+              shadowOffset: { width: 0, height: 8 },
+              elevation: 5,
             }}
           >
-            <QrCodeIcon size={18} color={accentOn} weight="bold" />
+            <QrCodeIcon size={20} color={accentOn} weight="bold" />
             <Text
               style={{
                 fontFamily: "Inter-SemiBold",
-                fontSize: 16,
+                fontSize: 17,
                 color: accentOn,
                 letterSpacing: -0.1,
               }}
@@ -229,7 +242,7 @@ export default function OnboardingScreen() {
           accessibilityLabel="Skip pairing for now"
           disabled={paired}
           style={({ pressed }) => ({
-            marginTop: 18,
+            marginTop: 16,
             alignSelf: "center",
             opacity: paired ? 0 : pressed ? 0.55 : 1,
           })}
@@ -239,18 +252,195 @@ export default function OnboardingScreen() {
               fontFamily: "Inter-Medium",
               fontSize: 13,
               color: tertiary,
-              textDecorationLine: "underline",
             }}
           >
             I'll connect my Mac later
           </Text>
         </Pressable>
+
+        {/* Home indicator hint */}
+        <View style={{ alignItems: "center", marginTop: 20 }}>
+          <View
+            style={{
+              width: 96,
+              height: 4,
+              borderRadius: 2,
+              backgroundColor: tertiary,
+              opacity: 0.18,
+            }}
+          />
+        </View>
       </Animated.View>
 
       <ConnectMacSheet
         open={sheetOpen}
         onClose={() => setSheetOpen(false)}
       />
+    </View>
+  );
+}
+
+/**
+ * Static decorative panel inside the welcome card — a laptop glyph
+ * sitting on a faint dot grid with three pulsing connection dots
+ * underneath. Communicates "pairing" without showing actual device
+ * state until the user starts the flow.
+ */
+function DecorativePanel({
+  paired,
+  host,
+  accent,
+  canvas,
+  border,
+}: {
+  paired: boolean;
+  host: string;
+  accent: string;
+  canvas: string;
+  border: string;
+}) {
+  // 3 pulsing dots — fades between full and 20% opacity in a staggered
+  // sequence so the eye reads it as connectivity activity.
+  const dot1 = useRef(new RNAnimated.Value(1)).current;
+  const dot2 = useRef(new RNAnimated.Value(0.5)).current;
+  const dot3 = useRef(new RNAnimated.Value(0.2)).current;
+
+  useEffect(() => {
+    if (paired) return;
+    const makeLoop = (val: RNAnimated.Value, delay: number) =>
+      RNAnimated.loop(
+        RNAnimated.sequence([
+          RNAnimated.delay(delay),
+          RNAnimated.timing(val, {
+            toValue: 1,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+          RNAnimated.timing(val, {
+            toValue: 0.2,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+        ]),
+      );
+    const l1 = makeLoop(dot1, 0);
+    const l2 = makeLoop(dot2, 200);
+    const l3 = makeLoop(dot3, 400);
+    l1.start();
+    l2.start();
+    l3.start();
+    return () => {
+      l1.stop();
+      l2.stop();
+      l3.stop();
+    };
+  }, [paired, dot1, dot2, dot3]);
+
+  return (
+    <View
+      style={{
+        aspectRatio: 1.6,
+        backgroundColor: canvas,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: border,
+        overflow: "hidden",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      {/* Dot grid background — pure CSS-ish via overlay of small dots */}
+      <View
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          opacity: 0.08,
+        }}
+      >
+        <DotGrid color={accent} />
+      </View>
+
+      <LaptopIcon size={56} color={accent} weight="light" />
+
+      <View
+        style={{
+          flexDirection: "row",
+          gap: 8,
+          marginTop: 14,
+        }}
+      >
+        <RNAnimated.View
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: 3,
+            backgroundColor: accent,
+            opacity: dot1,
+          }}
+        />
+        <RNAnimated.View
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: 3,
+            backgroundColor: accent,
+            opacity: dot2,
+          }}
+        />
+        <RNAnimated.View
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: 3,
+            backgroundColor: accent,
+            opacity: dot3,
+          }}
+        />
+      </View>
+    </View>
+  );
+}
+
+/** Simple dot grid via a stack of dots. Cheap to render, calm visual. */
+function DotGrid({ color }: { color: string }) {
+  // 6 columns × 5 rows = 30 dots — plenty to read as a grid texture
+  // without bloating render cost.
+  const rows = 5;
+  const cols = 6;
+  return (
+    <View
+      style={{
+        flex: 1,
+        flexDirection: "column",
+        justifyContent: "space-around",
+        paddingHorizontal: 18,
+        paddingVertical: 14,
+      }}
+    >
+      {Array.from({ length: rows }).map((_, r) => (
+        <View
+          key={r}
+          style={{
+            flexDirection: "row",
+            justifyContent: "space-between",
+          }}
+        >
+          {Array.from({ length: cols }).map((__, c) => (
+            <View
+              key={c}
+              style={{
+                width: 3,
+                height: 3,
+                borderRadius: 1.5,
+                backgroundColor: color,
+              }}
+            />
+          ))}
+        </View>
+      ))}
     </View>
   );
 }

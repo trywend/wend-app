@@ -23,8 +23,11 @@
  */
 import { useEffect, useRef, useState } from "react";
 import {
+  KeyboardAvoidingView,
   Linking,
+  Platform,
   Pressable,
+  ScrollView,
   TextInput,
   View,
 } from "react-native";
@@ -798,7 +801,22 @@ function CodeView(props: {
   }
 
   return (
-    <Centered>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
+    >
+      <ScrollView
+        contentContainerStyle={{
+          flexGrow: 1,
+          alignItems: "center",
+          justifyContent: "flex-start",
+          paddingTop: 32,
+          paddingBottom: 24,
+        }}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
       <Text
         style={{
           fontFamily: "Inter-SemiBold",
@@ -907,7 +925,8 @@ function CodeView(props: {
           </View>
         </Pressable>
       </View>
-    </Centered>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
