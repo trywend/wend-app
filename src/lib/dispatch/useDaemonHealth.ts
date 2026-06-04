@@ -1,17 +1,21 @@
 /**
  * Wend — useDaemonHealth hook.
  *
- * Lightweight background pinger for the spike daemon. Polls `/index` (the
- * daemon's index endpoint — a cheap GET that returns 200 when the process is
- * up and the token matches) on a 20s cadence and exposes a coarse health
- * signal the inbox + settings can render as a status dot.
+ * Background pinger for the Mac daemon. Resolves the live URL through
+ * the rendezvous backend (so we don't ping a stale URL the Mac
+ * abandoned after a tunnel rotation), then GETs /health with the
+ * paired bearer. 20s cadence, 4s per-request timeout.
  *
- * Uses the platform `fetch` (NOT `expo/fetch`) — we don't need streaming and
- * the platform fetch ships AbortController support that plays nice with our
- * 4s per-request timeout. `expo/fetch` is reserved for SSE consumption.
+ * Crucially, we await `resolved.refresh()` BEFORE every ping. The
+ * resolver's in-memory cache (30s TTL on success) would otherwise let
+ * the dot stay red across Mac restarts that happen faster than the
+ * cache TTL — exactly the case the user hits when iterating on the
+ * Mac app. One extra round-trip to the rendezvous per poll is cheap
+ * (~200ms typical) and removes the stale-cache class of bugs entirely.
  *
- * Polling is skipped entirely when env vars are missing; no point burning a
- * timer when there's nothing to talk to.
+ * Uses the platform `fetch` (NOT `expo/fetch`) — we don't need
+ * streaming and the platform fetch ships AbortController support that
+ * plays nice with our timeout.
  */
 import { useEffect, useRef, useState } from "react";
 
@@ -29,15 +33,7 @@ const POLL_INTERVAL_MS = 20_000;
 const REQUEST_TIMEOUT_MS = 4_000;
 
 export function useDaemonHealth(): DaemonHealth {
-  // Route health checks through the same resolver `useDispatch` uses,
-  // NOT through the raw daemonSlice.url. For v2 pairings the stored
-  // `url` is just a hint captured at QR-scan time; the LIVE URL flows
-  // through the rendezvous backend and updates every time the Mac's
-  // tunnel rotates. Pinging the stale hint kept the dot red across
-  // every Mac restart even though the daemon was perfectly healthy.
   const resolved = useResolvedDaemonURL();
-  const url0 = resolved.url;
-  const token0 = resolved.token;
   const isConfigured = resolved.isReady;
 
   const [status, setStatus] = useState<DaemonHealthStatus>(
@@ -45,9 +41,12 @@ export function useDaemonHealth(): DaemonHealth {
   );
   const [lastCheckedAt, setLastCheckedAt] = useState<number | null>(null);
 
-  // Hold the mounted flag in a ref so a late-arriving fetch can't setState
-  // after unmount and trigger a warning.
   const mountedRef = useRef(true);
+  // Stash the resolver in a ref so the polling closure always sees the
+  // current refresh() function without re-running the effect on every
+  // url/token change. The effect re-runs only on isConfigured change.
+  const resolvedRef = useRef(resolved);
+  resolvedRef.current = resolved;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -60,23 +59,37 @@ export function useDaemonHealth(): DaemonHealth {
     }
 
     const ping = async () => {
+      // Force a live URL refresh before each ping. Catches the case
+      // where the Mac restarted and minted a new cloudflared URL since
+      // our last poll — without this, the dot stays red forever even
+      // though the daemon is healthy at the new URL.
+      const r = resolvedRef.current;
+      if (r.deviceId) {
+        await r.refresh().catch(() => null);
+      }
+      const url0 = resolvedRef.current.url;
+      const token0 = resolvedRef.current.token;
+      if (!url0 || !token0) {
+        if (mountedRef.current) {
+          setStatus("down");
+          setLastCheckedAt(Date.now());
+        }
+        return;
+      }
+
       const controller = new AbortController();
       const timer = setTimeout(
         () => controller.abort(),
         REQUEST_TIMEOUT_MS,
       );
-      // Use /health (lightweight ~80-byte JSON). Older daemon revs only had
-      // /index (full project list payload); if /health 404s we fall back so
-      // health-checks don't lie about a perfectly-working daemon.
       const healthUrl = `${url0.replace(/\/$/, "")}/health?t=${encodeURIComponent(
         token0,
       )}`;
       const indexUrl = `${url0.replace(/\/$/, "")}/index?t=${encodeURIComponent(
         token0,
       )}`;
-      const url = healthUrl;
       try {
-        let res = await fetch(url, { signal: controller.signal });
+        let res = await fetch(healthUrl, { signal: controller.signal });
         if (res.status === 404) {
           // Fall back to /index for older daemons.
           res = await fetch(indexUrl, { signal: controller.signal });
@@ -92,7 +105,6 @@ export function useDaemonHealth(): DaemonHealth {
       }
     };
 
-    // Fire one immediately so the dot resolves quickly on mount, then poll.
     void ping();
     const interval = setInterval(ping, POLL_INTERVAL_MS);
 
@@ -100,9 +112,7 @@ export function useDaemonHealth(): DaemonHealth {
       mountedRef.current = false;
       clearInterval(interval);
     };
-    // Re-run the poller setup when the paired creds change so a fresh
-    // QR scan starts pinging the new daemon URL immediately.
-  }, [isConfigured, url0, token0]);
+  }, [isConfigured]);
 
   return { status, lastCheckedAt };
 }

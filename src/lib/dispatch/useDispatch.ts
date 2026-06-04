@@ -105,16 +105,20 @@ export function useDispatch(): UseDispatchResult {
       args.onEvent({ type: "done" });
       return;
     }
-    // Best-effort refresh if the cached URL is stale OR this is a v2
-    // device that hasn't resolved yet. Non-blocking — we fire it and
-    // immediately use the current url; the refreshed value lands in
-    // the slice for the NEXT dispatch. Trading one extra round-trip
-    // (only on the very first call after pairing) for guaranteed
-    // freshness without coupling dispatch latency to the rendezvous.
+    // AWAIT a fresh resolve before dispatching. The earlier non-blocking
+    // refresh pattern left the FIRST dispatch after any Mac tunnel
+    // rotation (Mac restart, network change) firing at a stale URL —
+    // the user got a `java.net.UnknownHostException` because the cached
+    // trycloudflare host was already dead on Cloudflare's edge. The
+    // 200-500ms rendezvous round-trip is invisible next to Claude's
+    // multi-second response time and removes the entire class of
+    // first-dispatch-after-restart failures.
+    let liveUrl = resolved.url;
     if (resolved.deviceId) {
-      void resolved.refresh();
+      const fresh = await resolved.refresh().catch(() => null);
+      if (fresh && fresh.length > 0) liveUrl = fresh;
     }
-    const creds = { url: resolved.url, token: resolved.token };
+    const creds = { url: liveUrl, token: resolved.token };
 
     const controller = new AbortController();
     abortRef.current = controller;
