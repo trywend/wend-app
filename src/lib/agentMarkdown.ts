@@ -372,6 +372,127 @@ export function parseInline(input: string): InlineNode[] {
 }
 
 /**
+ * Walk a parsed Block[] and collect every `filePath` InlineNode in document
+ * order, deduped. Used by FileChangesSummary to surface files mentioned in
+ * agent prose alongside files touched by tool calls.
+ *
+ * Document order matters — the first mention is usually the primary
+ * subject of the response, and we want it at the top of the summary list.
+ */
+export function extractFilePathsFromBlocks(blocks: Block[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  const visitInline = (nodes: InlineNode[]): void => {
+    for (const n of nodes) {
+      switch (n.type) {
+        case "filePath":
+          if (!seen.has(n.path)) {
+            seen.add(n.path);
+            out.push(n.path);
+          }
+          break;
+        case "bold":
+        case "italic":
+          visitInline(n.nodes);
+          break;
+        // text / code / link have no nested file paths we care about
+        default:
+          break;
+      }
+    }
+  };
+
+  for (const b of blocks) {
+    switch (b.type) {
+      case "paragraph":
+      case "heading":
+      case "quote":
+        visitInline(b.nodes);
+        break;
+      case "list":
+        for (const item of b.items) visitInline(item);
+        break;
+      // codeBlock + hr have no inline nodes
+      default:
+        break;
+    }
+  }
+  return out;
+}
+
+/**
+ * Pull file paths out of a flat ToolCall[]. Looks at the common Claude
+ * tool input keys (`file_path`, `path`, `files`, `notebook_path`) and
+ * returns a deduped list in encounter order.
+ *
+ * The shape is `Array<{ name: string; input?: unknown }>` to stay aligned
+ * with AgentRunBlock's ToolCall interface without creating a circular
+ * import — we accept the loose shape and pick fields defensively.
+ */
+export function extractFilePathsFromToolCalls(
+  calls: Array<{ name?: string; input?: unknown }>,
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  const push = (p: unknown): void => {
+    if (typeof p !== "string") return;
+    const trimmed = p.trim();
+    if (trimmed.length === 0) return;
+    if (seen.has(trimmed)) return;
+    seen.add(trimmed);
+    out.push(trimmed);
+  };
+
+  for (const call of calls) {
+    const input = call?.input;
+    if (input == null || typeof input !== "object") continue;
+    const obj = input as Record<string, unknown>;
+    push(obj.file_path);
+    push(obj.path);
+    push(obj.notebook_path);
+    // MultiEdit and similar list-form inputs.
+    const files = obj.files;
+    if (Array.isArray(files)) {
+      for (const f of files) {
+        if (typeof f === "string") push(f);
+        else if (f && typeof f === "object") {
+          const o = f as Record<string, unknown>;
+          push(o.file_path);
+          push(o.path);
+        }
+      }
+    }
+    // Some tools nest under `edits` with file_path on each edit.
+    const edits = obj.edits;
+    if (Array.isArray(edits)) {
+      for (const e of edits) {
+        if (e && typeof e === "object") {
+          const o = e as Record<string, unknown>;
+          push(o.file_path);
+          push(o.path);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Tool names that indicate a file mutation (vs a read-only operation).
+ * Used by FileChangesSummary to decide whether the block should render —
+ * we only want to surface CHANGES, not "I read 5 files".
+ */
+export const FILE_MUTATION_TOOL_NAMES = new Set([
+  "Edit",
+  "MultiEdit",
+  "Write",
+  "Create",
+  "NotebookEdit",
+]);
+
+/**
  * Produce a one-line, plain-text summary suitable for a collapsed
  * accordion header. Strips markdown markers, collapses whitespace,
  * truncates to `maxLen` with an ellipsis.
