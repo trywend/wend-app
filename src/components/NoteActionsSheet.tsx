@@ -174,82 +174,90 @@ function NoteActionsSheetMounted({
         </View>
 
         {confirmingDelete ? (
-          <View
-            style={{ paddingHorizontal: 20, paddingTop: 4, gap: 16 }}
-          >
-            <Text variant="body" style={{ color: inkColor }}>
-              Delete this note? This cannot be undone.
-            </Text>
-            <View
+          <View style={{ paddingHorizontal: 24, paddingTop: 8 }}>
+            {/* Body — pull more vertical breathing room so the confirm
+                reads as deliberate, not a cramped popover. */}
+            <Text
               style={{
-                flexDirection: "row",
-                gap: 12,
-                marginTop: 4,
+                color: subtleColor,
+                fontFamily: "Inter-Regular",
+                fontSize: 15,
+                lineHeight: 22,
+                marginBottom: 24,
               }}
             >
-              {/* Cancel — outlined. Wrapper-View pattern (cssInterop). */}
-              <Pressable
-                onPress={() => setConfirmingDelete(false)}
-                accessibilityRole="button"
-                accessibilityLabel="Cancel"
-                style={({ pressed }) => ({
-                  flex: 1,
-                  opacity: pressed ? 0.7 : 1,
-                })}
-              >
-                <View
-                  style={{
-                    height: 48,
-                    borderRadius: 12,
-                    borderWidth: 1,
-                    borderColor: borderColor,
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: inkColor,
-                      fontFamily: "Inter-SemiBold",
-                      fontSize: 15,
-                    }}
-                  >
-                    Cancel
-                  </Text>
-                </View>
-              </Pressable>
+              Delete this note? This cannot be undone.
+            </Text>
 
-              {/* Delete — destructive fill. */}
-              <Pressable
-                onPress={handleDeleteConfirm}
-                accessibilityRole="button"
-                accessibilityLabel="Delete"
-                style={({ pressed }) => ({
-                  flex: 1,
-                  opacity: pressed ? 0.85 : 1,
-                })}
+            {/* Destructive action stacked on top: visually dominant pill,
+                full-width, rose-tinted. Cancel underneath as a low-weight
+                text affordance. iOS-action-sheet hierarchy. */}
+            <Pressable
+              onPress={handleDeleteConfirm}
+              accessibilityRole="button"
+              accessibilityLabel="Delete"
+              style={({ pressed }) => ({
+                opacity: pressed ? 0.88 : 1,
+                marginBottom: 8,
+              })}
+            >
+              <View
+                style={{
+                  height: 56,
+                  borderRadius: 16,
+                  backgroundColor: failedColor,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexDirection: "row",
+                  gap: 8,
+                  shadowColor: failedColor,
+                  shadowOpacity: 0.22,
+                  shadowRadius: 14,
+                  shadowOffset: { width: 0, height: 6 },
+                  elevation: 4,
+                }}
               >
-                <View
+                <TrashIcon size={18} color="#FFFFFF" weight="bold" />
+                <Text
                   style={{
-                    height: 48,
-                    borderRadius: 12,
-                    backgroundColor: failedColor,
-                    alignItems: "center",
-                    justifyContent: "center",
+                    color: "#FFFFFF",
+                    fontFamily: "Inter-SemiBold",
+                    fontSize: 16,
+                    letterSpacing: -0.1,
                   }}
                 >
-                  <Text
-                    style={{
-                      color: "#FFFFFF",
-                      fontFamily: "Inter-SemiBold",
-                      fontSize: 15,
-                    }}
-                  >
-                    Delete
-                  </Text>
-                </View>
-              </Pressable>
-            </View>
+                  Delete note
+                </Text>
+              </View>
+            </Pressable>
+
+            {/* Cancel — low-weight, no fill, generous tap target. */}
+            <Pressable
+              onPress={() => setConfirmingDelete(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel"
+              style={({ pressed }) => ({
+                opacity: pressed ? 0.6 : 1,
+              })}
+            >
+              <View
+                style={{
+                  height: 52,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Text
+                  style={{
+                    color: subtleColor,
+                    fontFamily: "Inter-Medium",
+                    fontSize: 15,
+                  }}
+                >
+                  Cancel
+                </Text>
+              </View>
+            </Pressable>
           </View>
         ) : (
           <View>
