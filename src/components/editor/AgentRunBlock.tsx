@@ -50,6 +50,8 @@ import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
 import { Markdown } from "@/components/editor/Markdown";
 import { parseMarkdown, summarizeMarkdown } from "@/lib/agentMarkdown";
+import { ToolCompaction } from "@/components/editor/ToolCompaction";
+import { FileChangesSummary } from "@/components/editor/FileChangesSummary";
 
 export interface ToolCall {
   name: string;
@@ -365,12 +367,20 @@ export function AgentRunBlock({
               open={toolsOpen}
               onToggle={() => setToolsOpen((v) => !v)}
               ink={ink}
-              subtle={subtle}
               tertiary={tertiary}
               border={border}
               accent={accent}
             />
           ) : null}
+
+          {/* File changes summary — surfaces edits ahead of the prose so
+              the user doesn't have to expand the tool drawer to know
+              what touched. Renders nothing if there are no paths. */}
+          <FileChangesSummary
+            blocks={blocks}
+            toolCalls={calls}
+            onOpenFile={onOpenFile}
+          />
 
           {/* Response body */}
           {state.response.length > 0 || running ? (
@@ -479,7 +489,6 @@ function ToolDrawer({
   open,
   onToggle,
   ink,
-  subtle,
   tertiary,
   border,
   accent,
@@ -488,7 +497,6 @@ function ToolDrawer({
   open: boolean;
   onToggle: () => void;
   ink: string;
-  subtle: string;
   tertiary: string;
   border: string;
   accent: string;
@@ -542,89 +550,10 @@ function ToolDrawer({
           style={{
             paddingHorizontal: 10,
             paddingBottom: 10,
-            gap: 6,
           }}
         >
-          {calls.map((call, i) => (
-            <ToolCallCard
-              key={i}
-              call={call}
-              index={i + 1}
-              ink={ink}
-              subtle={subtle}
-              tertiary={tertiary}
-              border={border}
-            />
-          ))}
+          <ToolCompaction calls={calls} />
         </Animated.View>
-      ) : null}
-    </View>
-  );
-}
-
-function ToolCallCard({
-  call,
-  index,
-  ink,
-  subtle,
-  tertiary,
-  border,
-}: {
-  call: ToolCall;
-  index: number;
-  ink: string;
-  subtle: string;
-  tertiary: string;
-  border: string;
-}) {
-  const preview = useMemo(() => summarizeToolInput(call.input), [call.input]);
-  return (
-    <View
-      style={{
-        borderWidth: 1,
-        borderColor: border,
-        borderRadius: 10,
-        paddingHorizontal: 10,
-        paddingVertical: 8,
-        backgroundColor: "#FFFFFF",
-      }}
-    >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-        <Text
-          style={{
-            fontFamily: "JetBrainsMono-Medium",
-            fontSize: 10.5,
-            color: tertiary,
-            minWidth: 18,
-          }}
-        >
-          {String(index).padStart(2, "0")}
-        </Text>
-        <Text
-          style={{
-            fontFamily: "JetBrainsMono-Medium",
-            fontSize: 12,
-            color: ink,
-            letterSpacing: -0.2,
-          }}
-        >
-          {call.name}
-        </Text>
-      </View>
-      {preview ? (
-        <Text
-          numberOfLines={2}
-          style={{
-            marginTop: 4,
-            marginLeft: 24,
-            fontFamily: "JetBrainsMono",
-            fontSize: 11,
-            lineHeight: 16,
-            color: subtle,
-          }}
-        >
-          {preview}
-        </Text>
       ) : null}
     </View>
   );
@@ -658,41 +587,4 @@ function formatDuration(ms: number): string {
 function extractTicket(text: string): string | null {
   const match = text.match(/\b[A-Z]{2,}-\d+\b/);
   return match ? match[0] : null;
-}
-
-/**
- * Turn an arbitrary tool input object into a 1-line preview. Tries the
- * most-likely useful keys first (file_path, command, query), falls back to
- * a compact JSON snippet.
- */
-function summarizeToolInput(input: unknown): string | null {
-  if (input == null) return null;
-  if (typeof input === "string") return input;
-  if (typeof input !== "object") return String(input);
-
-  const obj = input as Record<string, unknown>;
-  // Common Claude tool fields — show whichever is present.
-  const priority = [
-    "file_path",
-    "path",
-    "command",
-    "query",
-    "pattern",
-    "url",
-    "description",
-  ];
-  for (const key of priority) {
-    const v = obj[key];
-    if (typeof v === "string" && v.length > 0) {
-      return `${key}: ${v}`;
-    }
-  }
-  // Fallback: compact JSON, no quotes around keys.
-  try {
-    const json = JSON.stringify(obj);
-    if (json.length > 120) return json.slice(0, 119) + "…";
-    return json;
-  } catch {
-    return null;
-  }
 }
