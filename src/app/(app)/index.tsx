@@ -367,21 +367,29 @@ export default function HomeScreen() {
   }, [showCaretOverlay, blink]);
 
   /* ─── Send handler ─────────────────────────────────────────────────── */
-  async function handleSend() {
+  // `promptOverride` lets Retry (and any future caller) bypass the normal
+  // body/followUp routing entirely — they pass the exact prompt to send
+  // and we don't read state. Without this, Retry-on-follow-up was a no-op
+  // (setBody → nextPromptSource was still lastFollowUp → canSend was false
+  // → handleSend bailed at the top).
+  async function handleSend(promptOverride?: string) {
+    const candidate = (promptOverride ?? nextPromptSource).trim();
+    const canSendNow = candidate.length > 0;
     // eslint-disable-next-line no-console
     console.log("[wend] send tapped", {
-      canSend,
+      canSend: canSendNow,
       isStreaming,
       daemonConfigured,
       runs: runs.length,
+      override: Boolean(promptOverride),
     });
-    if (!canSend || isStreaming) return;
+    if (!canSendNow || isStreaming) return;
     Keyboard.dismiss();
     if (coachmarkVisible) dismissCoachmark();
 
     if (!daemonConfigured) {
       setInflight({
-        prompt: nextPromptSource.trim(),
+        prompt: candidate,
         response: "",
         toolUses: [],
         toolCalls: [],
@@ -393,16 +401,20 @@ export default function HomeScreen() {
         routeSource: null,
         status: "error",
         error:
-          "Daemon not configured. Set EXPO_PUBLIC_DAEMON_URL + EXPO_PUBLIC_DAEMON_TOKEN in .env.local and RESTART Metro.",
+          "No Mac paired. Open Settings → Connectivity → Mac and pair from the Wend.app QR.",
       });
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
       return;
     }
 
-    const prompt = nextPromptSource.trim();
-    const sessionId = isFirstSend
+    const prompt = candidate;
+    // For overrides (retry), don't continue the prior session — it errored,
+    // so the sessionId may not be valid. Start fresh.
+    const sessionId = promptOverride
       ? null
-      : runs[lastRunIdx]!.sessionId;
+      : isFirstSend
+        ? null
+        : runs[lastRunIdx]!.sessionId;
 
     setInflight({
       prompt,
@@ -614,11 +626,15 @@ export default function HomeScreen() {
     // sessionId — Claude likely didn't establish one when the run errored.
     // The new dispatch becomes a brand-new entry in runs[]; the old errored
     // entry stays as history so the user can see what happened.
+    //
+    // We pass the prompt directly via the override path on handleSend
+    // instead of doing setBody+setTimeout — that pattern broke for
+    // FOLLOW-UP retries because nextPromptSource is computed from
+    // body OR lastFollowUp (never both), so setBody didn't actually
+    // change what handleSend would send.
     if (isStreaming) return;
-    setBody(failedRun.prompt); // surface the prompt back in the body so the
-    // send goes through the normal handleSend path with a clean state.
     setInflight(null);
-    setTimeout(() => void handleSend(), 50);
+    void handleSend(failedRun.prompt);
   }
 
   /* ─── Sign out ─────────────────────────────────────────────────────── */
@@ -1105,7 +1121,7 @@ export default function HomeScreen() {
             </View>
 
             <Pressable
-              onPress={isStreaming ? handleStop : handleSend}
+              onPress={isStreaming ? handleStop : () => void handleSend()}
               disabled={!isStreaming && !canSend}
               accessibilityRole="button"
               accessibilityState={{ disabled: !isStreaming && !canSend }}

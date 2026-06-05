@@ -80,6 +80,18 @@ export function useResolvedDaemonURL(): ResolvedDaemon {
         signal: controller.signal,
       });
       clearTimeout(timer);
+      // 404 from a properly-authed GET means the device row no longer
+      // exists. This happens when the user clicked "Reset device" on the
+      // Mac (which deletes the row + revokes the token), or when an
+      // admin removed it from the backend. We MUST NOT silently fall back
+      // to the cached URL hint — the Mac at the hint URL is either gone
+      // or a different paired Mac. Wipe the local pairing so the user
+      // gets bounced back to onboarding instead of dispatching into the
+      // void.
+      if (res.status === 404) {
+        useDaemonStore.getState().clear();
+        return null;
+      }
       if (!res.ok) return null;
       const body = (await res.json()) as { currentUrl?: string | null };
       const fresh = body?.currentUrl ?? null;
