@@ -199,6 +199,17 @@ export default function HomeScreen() {
     isBodyEmpty && isTitleEmpty && !hasRuns && !inflight;
   const hasContent = !noUserInputYet;
 
+  // Scroll-reveal for the top bar on the blank canvas. The bar normally only
+  // shows once the note has content, so a fresh note opens with a quiet
+  // header-less surface. Pulling the scroll view down past PULL_REVEAL_PX
+  // (iOS overscroll bounce, or Android drag against an empty content area)
+  // brings the bar in temporarily — gives the user a way to reach Inbox /
+  // Search / ⋮ without first having to type something.
+  const [scrollOffsetY, setScrollOffsetY] = useState(0);
+  const PULL_REVEAL_PX = 28;
+  const showTopBarFromScroll = scrollOffsetY <= -PULL_REVEAL_PX;
+  const showTopBar = hasContent || showTopBarFromScroll;
+
   // What the next send would use as a prompt.
   const nextPromptSource = isFirstSend ? body : lastFollowUp;
   const canSend = nextPromptSource.trim().length > 0;
@@ -678,8 +689,11 @@ export default function HomeScreen() {
         keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
         style={{ flex: 1 }}
       >
-        {/* ─── Top app bar (S2 only) ──────────────────────────────────── */}
-        {hasContent ? (
+        {/* ─── Top app bar ────────────────────────────────────────────
+            Visible whenever the note has content (S2) OR the user has
+            pulled the scroll surface down past the reveal threshold on a
+            blank canvas (S1). Reanimated handles the fade in/out. */}
+        {showTopBar ? (
           <Animated.View
             entering={FadeIn.duration(220)}
             exiting={FadeOut.duration(160)}
@@ -779,6 +793,20 @@ export default function HomeScreen() {
             flexGrow: 1,
           }}
           keyboardShouldPersistTaps="handled"
+          // Drive showTopBarFromScroll. 16ms throttle matches a 60Hz refresh
+          // so we don't fire on every native pixel of pan but still react in
+          // the same frame the bar should appear.
+          onScroll={(e) =>
+            setScrollOffsetY(e.nativeEvent.contentOffset.y)
+          }
+          scrollEventThrottle={16}
+          // Bounces=true is the iOS default but needed explicitly so the
+          // empty S1 canvas has a pull-to-reveal affordance even when
+          // content fits the viewport. Android equivalent is the
+          // overscroll glow + pan; we still get negative offsets there.
+          bounces
+          alwaysBounceVertical
+          overScrollMode="always"
         >
           <TextInput
             value={title}
