@@ -55,12 +55,21 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ArrowUpIcon,
   CheckIcon,
+  CodeIcon,
+  CodeBlockIcon,
   DotsThreeVerticalIcon,
+  LinkIcon,
   ListBulletsIcon,
+  ListNumbersIcon,
   MagnifyingGlassIcon,
   PaperclipIcon,
+  QuotesIcon,
   StopIcon,
+  TextBIcon,
   TextHOneIcon,
+  TextHTwoIcon,
+  TextHThreeIcon,
+  TextItalicIcon,
   TrayIcon,
   XIcon,
 } from "phosphor-react-native";
@@ -106,6 +115,15 @@ import {
   FirstNoteCoachmark,
   FIRST_NOTE_COACHMARK_KEY,
 } from "@/components/editor/FirstNoteCoachmark";
+import { LiveMarkdownInput } from "@/components/editor/LiveMarkdownInput";
+import {
+  prefixLine,
+  wrapSelection,
+  insertAtCursor,
+  insertCodeFence,
+  type CurrentSelection,
+  type InsertResult,
+} from "@/lib/markdownInsert";
 import * as Crypto from "expo-crypto";
 
 const TOP_BAR_HEIGHT = 48;
@@ -189,6 +207,23 @@ export default function HomeScreen() {
   const bodyRef = useRef<TextInput>(null);
   const followUpRefs = useRef<Record<number, TextInput | null>>({});
   const scrollRef = useRef<ScrollView>(null);
+
+  // Selection tracking — the toolbar's smart insertion helpers need to know
+  // where the cursor is. We track LAST KNOWN selection per input; toolbar
+  // mutations then set `pendingSelection` which the TextInput consumes via
+  // its `selection` prop for exactly one render (cleared on next change so
+  // the user's normal typing isn't fighting a controlled cursor).
+  const [bodySelection, setBodySelection] = useState<CurrentSelection | null>(
+    null,
+  );
+  const [pendingBodySelection, setPendingBodySelection] =
+    useState<CurrentSelection | null>(null);
+  const [followUpSelections, setFollowUpSelections] = useState<
+    Record<number, CurrentSelection | null>
+  >({});
+  const [pendingFollowUpSelections, setPendingFollowUpSelections] = useState<
+    Record<number, CurrentSelection | null>
+  >({});
 
   const lastRunIdx = runs.length - 1;
   const hasRuns = runs.length > 0;
@@ -698,6 +733,32 @@ export default function HomeScreen() {
     void handleSend(failedRun.prompt);
   }
 
+  /* ─── Toolbar markdown actions ─────────────────────────────────────── */
+  // All toolbar buttons route through this dispatcher. It picks the active
+  // input (body when no runs yet, otherwise the most recent follow-up),
+  // applies the InsertResult, and schedules a one-shot selection update so
+  // the cursor lands where the helper computed.
+  function applyMarkdownAction(
+    fn: (text: string, sel: CurrentSelection | null) => InsertResult,
+  ) {
+    if (isFirstSend) {
+      const result = fn(body, bodySelection);
+      setBody(result.value);
+      setPendingBodySelection(result.selection);
+      // Refocus so the keyboard stays up after a toolbar tap (Pressable steals
+      // focus on iOS otherwise).
+      setTimeout(() => bodyRef.current?.focus(), 0);
+      return;
+    }
+    const idx = lastRunIdx;
+    if (idx < 0) return;
+    const current = runs[idx]!.followUp;
+    const result = fn(current, followUpSelections[idx] ?? null);
+    updateRunFollowUp(idx, result.value);
+    setPendingFollowUpSelections((s) => ({ ...s, [idx]: result.selection }));
+    setTimeout(() => followUpRefs.current[idx]?.focus(), 0);
+  }
+
   /* ─── Sign out ─────────────────────────────────────────────────────── */
   async function handleSignOut() {
     try {
@@ -899,12 +960,14 @@ export default function HomeScreen() {
                 />
               ) : null}
 
-              <TextInput
+              <LiveMarkdownInput
                 ref={bodyRef}
                 value={body}
-                onChangeText={setBody}
+                onChangeText={(t) => {
+                  setBody(t);
+                  setPendingBodySelection(null);
+                }}
                 autoFocus
-                multiline
                 caretHidden={showCaretOverlay}
                 textAlignVertical="top"
                 placeholder={hasContent ? "Write a thought..." : ""}
@@ -913,6 +976,16 @@ export default function HomeScreen() {
                 onFocus={() => setBodyFocused(true)}
                 onBlur={() => setBodyFocused(false)}
                 scrollEnabled={false}
+                selection={pendingBodySelection ?? undefined}
+                onSelectionChange={(e) => {
+                  setBodySelection(e.nativeEvent.selection);
+                }}
+                theme={{
+                  ink: inkColor,
+                  subtle: subtleColor,
+                  accent: accent,
+                  surfaceChip: surfaceChip,
+                }}
                 style={{
                   minHeight: 80,
                   fontFamily: "Inter-Regular",
@@ -947,15 +1020,23 @@ export default function HomeScreen() {
               />
               <FollowUpInput
                 value={run.followUp}
-                onChangeText={(t) => updateRunFollowUp(idx, t)}
+                onChangeText={(t) => {
+                  updateRunFollowUp(idx, t);
+                  setPendingFollowUpSelections((s) => ({ ...s, [idx]: null }));
+                }}
                 placeholder="Ask a follow-up..."
                 placeholderColor={placeholderColor}
                 inkColor={inkColor}
+                subtleColor={subtleColor}
                 caretColor={tokens["accent-caret"]}
                 accentColor={accent}
                 accentOnColor={accentOn}
                 surfaceChipColor={surfaceChip}
                 tertiaryColor={tokens["text-tertiary"]}
+                pendingSelection={pendingFollowUpSelections[idx] ?? null}
+                onSelectionChange={(sel) => {
+                  setFollowUpSelections((s) => ({ ...s, [idx]: sel }));
+                }}
                 inputRef={(r) => {
                   followUpRefs.current[idx] = r;
                 }}
@@ -1127,80 +1208,94 @@ export default function HomeScreen() {
               height: TOOLBAR_HEIGHT,
               flexDirection: "row",
               alignItems: "center",
-              justifyContent: "space-between",
-              paddingHorizontal: 16,
+              paddingLeft: 8,
+              paddingRight: 12,
               borderTopWidth: 1,
               borderTopColor: borderColor,
               backgroundColor: canvas,
             }}
           >
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
+            {/* Scrollable formatting buttons. Horizontal so we can fit a
+                proper formatting palette without cramming the visible width. */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="always"
+              style={{ flex: 1 }}
+              contentContainerStyle={{
+                alignItems: "center",
+                paddingRight: 8,
+              }}
+            >
               <ToolbarButton
-                onPress={() => {
-                  if (isFirstSend) {
-                    insertAtBodyEnd("# ", setBody, body);
-                  } else {
-                    insertAtFollowUpEnd(
-                      "# ",
-                      lastRunIdx,
-                      lastFollowUp,
-                      updateRunFollowUp,
-                    );
-                  }
-                }}
-                accessibilityLabel="Heading"
-                icon={<TextHOneIcon size={22} color={subtleColor} weight="regular" />}
+                onPress={() => applyMarkdownAction((v, s) => prefixLine(v, s, "# "))}
+                accessibilityLabel="Heading 1"
+                icon={<TextHOneIcon size={20} color={subtleColor} weight="regular" />}
               />
               <ToolbarButton
-                onPress={() => {
-                  if (isFirstSend) {
-                    insertAtBodyEnd("`code`", setBody, body);
-                  } else {
-                    insertAtFollowUpEnd(
-                      "`code`",
-                      lastRunIdx,
-                      lastFollowUp,
-                      updateRunFollowUp,
-                    );
-                  }
-                }}
-                accessibilityLabel="Inline code"
-                content={
-                  <Text
-                    style={{
-                      fontFamily: "JetBrainsMono-Medium",
-                      fontSize: 16,
-                      color: subtleColor,
-                    }}
-                  >
-                    M
-                  </Text>
+                onPress={() => applyMarkdownAction((v, s) => prefixLine(v, s, "## "))}
+                accessibilityLabel="Heading 2"
+                icon={<TextHTwoIcon size={20} color={subtleColor} weight="regular" />}
+              />
+              <ToolbarButton
+                onPress={() => applyMarkdownAction((v, s) => prefixLine(v, s, "### "))}
+                accessibilityLabel="Heading 3"
+                icon={<TextHThreeIcon size={20} color={subtleColor} weight="regular" />}
+              />
+              <ToolbarDivider color={borderColor} />
+              <ToolbarButton
+                onPress={() =>
+                  applyMarkdownAction((v, s) => wrapSelection(v, s, "**", "**"))
                 }
+                accessibilityLabel="Bold"
+                icon={<TextBIcon size={20} color={subtleColor} weight="bold" />}
               />
               <ToolbarButton
-                onPress={() => {
-                  if (isFirstSend) {
-                    insertAtBodyEnd("\n- ", setBody, body);
-                  } else {
-                    insertAtFollowUpEnd(
-                      "\n- ",
-                      lastRunIdx,
-                      lastFollowUp,
-                      updateRunFollowUp,
-                    );
-                  }
-                }}
+                onPress={() =>
+                  applyMarkdownAction((v, s) => wrapSelection(v, s, "*", "*"))
+                }
+                accessibilityLabel="Italic"
+                icon={<TextItalicIcon size={20} color={subtleColor} weight="regular" />}
+              />
+              <ToolbarButton
+                onPress={() =>
+                  applyMarkdownAction((v, s) => wrapSelection(v, s, "`", "`"))
+                }
+                accessibilityLabel="Inline code"
+                icon={<CodeIcon size={20} color={subtleColor} weight="regular" />}
+              />
+              <ToolbarDivider color={borderColor} />
+              <ToolbarButton
+                onPress={() => applyMarkdownAction((v, s) => prefixLine(v, s, "- "))}
                 accessibilityLabel="Bulleted list"
-                icon={<ListBulletsIcon size={22} color={subtleColor} weight="regular" />}
+                icon={<ListBulletsIcon size={20} color={subtleColor} weight="regular" />}
               />
-              <View
-                style={{
-                  width: 1,
-                  height: 20,
-                  backgroundColor: borderColor,
-                  marginHorizontal: 4,
-                }}
+              <ToolbarButton
+                onPress={() => applyMarkdownAction((v, s) => prefixLine(v, s, "1. "))}
+                accessibilityLabel="Numbered list"
+                icon={<ListNumbersIcon size={20} color={subtleColor} weight="regular" />}
               />
+              <ToolbarButton
+                onPress={() => applyMarkdownAction((v, s) => prefixLine(v, s, "> "))}
+                accessibilityLabel="Blockquote"
+                icon={<QuotesIcon size={20} color={subtleColor} weight="regular" />}
+              />
+              <ToolbarButton
+                onPress={() => applyMarkdownAction((v, s) => insertCodeFence(v, s))}
+                accessibilityLabel="Code block"
+                icon={<CodeBlockIcon size={20} color={subtleColor} weight="regular" />}
+              />
+              <ToolbarButton
+                onPress={() =>
+                  applyMarkdownAction((v, s) =>
+                    // [text](url) — select "text" so it overwrites on first type
+                    insertAtCursor(v, s, "[text](url)", 1, 5),
+                  )
+                }
+                accessibilityLabel="Link"
+                icon={<LinkIcon size={20} color={subtleColor} weight="regular" />}
+              />
+              <ToolbarDivider color={borderColor} />
               <ToolbarButton
                 onPress={() => {
                   if (!resolvedNoteId) return;
@@ -1210,13 +1305,13 @@ export default function HomeScreen() {
                 accessibilityLabel="Attach file"
                 icon={
                   <PaperclipIcon
-                    size={22}
+                    size={20}
                     color={attachments.length > 0 ? accent : subtleColor}
                     weight={attachments.length > 0 ? "fill" : "regular"}
                   />
                 }
               />
-            </View>
+            </ScrollView>
 
             <Pressable
               onPress={isStreaming ? handleStop : () => void handleSend()}
@@ -1228,6 +1323,7 @@ export default function HomeScreen() {
                 width: 36,
                 height: 36,
                 borderRadius: 18,
+                marginLeft: 8,
                 alignItems: "center",
                 justifyContent: "center",
                 backgroundColor: isStreaming || canSend ? accent : surfaceChip,
@@ -1467,13 +1563,27 @@ function ToolbarButton(props: {
         height: 36,
         alignItems: "center",
         justifyContent: "center",
-        borderRadius: 6,
-        marginRight: 4,
-        opacity: pressed ? 0.55 : 1,
+        borderRadius: 8,
+        marginHorizontal: 1,
+        backgroundColor: pressed ? "rgba(0,0,0,0.06)" : "transparent",
       })}
     >
       {props.content ?? props.icon}
     </Pressable>
+  );
+}
+
+function ToolbarDivider({ color }: { color: string }) {
+  return (
+    <View
+      style={{
+        width: 1,
+        height: 20,
+        backgroundColor: color,
+        marginHorizontal: 6,
+        opacity: 0.7,
+      }}
+    />
   );
 }
 
@@ -1483,11 +1593,14 @@ function FollowUpInput(props: {
   placeholder: string;
   placeholderColor: string;
   inkColor: string;
+  subtleColor: string;
   caretColor: string;
   accentColor: string;
   accentOnColor: string;
   surfaceChipColor: string;
   tertiaryColor: string;
+  pendingSelection: CurrentSelection | null;
+  onSelectionChange: (sel: CurrentSelection) => void;
   inputRef: (r: TextInput | null) => void;
   isLast: boolean;
   /** Only render the inline send button under the LAST follow-up — that's
@@ -1510,17 +1623,26 @@ function FollowUpInput(props: {
         gap: 10,
       }}
     >
-      <TextInput
+      <LiveMarkdownInput
         ref={props.inputRef}
         value={props.value}
         onChangeText={props.onChangeText}
         onFocus={props.onFocus}
-        multiline
         placeholder={props.placeholder}
         placeholderTextColor={props.placeholderColor}
         selectionColor={props.caretColor}
         scrollEnabled={false}
         textAlignVertical="top"
+        selection={props.pendingSelection ?? undefined}
+        onSelectionChange={(e) =>
+          props.onSelectionChange(e.nativeEvent.selection)
+        }
+        theme={{
+          ink: props.inkColor,
+          subtle: props.subtleColor,
+          accent: props.accentColor,
+          surfaceChip: props.surfaceChipColor,
+        }}
         style={{
           flex: 1,
           minHeight: 40,
@@ -1725,32 +1847,6 @@ function inflightToBlockState(run: InflightRun): AgentRunBlockState {
     costUsd: run.costUsd,
     error: run.error,
   };
-}
-
-function insertAtBodyEnd(
-  fragment: string,
-  setBody: (s: string) => void,
-  current: string,
-) {
-  const next =
-    current.length > 0 && !current.endsWith("\n") && !fragment.startsWith("\n")
-      ? `${current}\n${fragment}`
-      : `${current}${fragment}`;
-  setBody(next);
-}
-
-function insertAtFollowUpEnd(
-  fragment: string,
-  idx: number,
-  current: string,
-  update: (idx: number, text: string) => void,
-) {
-  if (idx < 0) return;
-  const next =
-    current.length > 0 && !current.endsWith("\n") && !fragment.startsWith("\n")
-      ? `${current}\n${fragment}`
-      : `${current}${fragment}`;
-  update(idx, next);
 }
 
 /** Phase 2 stub for dispatch detection — grabs the first ticket-like token
