@@ -56,9 +56,8 @@ import {
   ArrowUpIcon,
   CheckIcon,
   CodeIcon,
-  CodeBlockIcon,
   DotsThreeVerticalIcon,
-  LinkIcon,
+  LinkSimpleIcon,
   ListBulletsIcon,
   ListNumbersIcon,
   MagnifyingGlassIcon,
@@ -67,8 +66,8 @@ import {
   StopIcon,
   TextBIcon,
   TextHOneIcon,
-  TextHTwoIcon,
   TextHThreeIcon,
+  TextHTwoIcon,
   TextItalicIcon,
   TrayIcon,
   XIcon,
@@ -115,15 +114,6 @@ import {
   FirstNoteCoachmark,
   FIRST_NOTE_COACHMARK_KEY,
 } from "@/components/editor/FirstNoteCoachmark";
-import { LiveMarkdownInput } from "@/components/editor/LiveMarkdownInput";
-import {
-  prefixLine,
-  wrapSelection,
-  insertAtCursor,
-  insertCodeFence,
-  type CurrentSelection,
-  type InsertResult,
-} from "@/lib/markdownInsert";
 import * as Crypto from "expo-crypto";
 
 const TOP_BAR_HEIGHT = 48;
@@ -208,22 +198,15 @@ export default function HomeScreen() {
   const followUpRefs = useRef<Record<number, TextInput | null>>({});
   const scrollRef = useRef<ScrollView>(null);
 
-  // Selection tracking — the toolbar's smart insertion helpers need to know
-  // where the cursor is. We track LAST KNOWN selection per input; toolbar
-  // mutations then set `pendingSelection` which the TextInput consumes via
-  // its `selection` prop for exactly one render (cleared on next change so
-  // the user's normal typing isn't fighting a controlled cursor).
-  const [bodySelection, setBodySelection] = useState<CurrentSelection | null>(
-    null,
-  );
-  const [pendingBodySelection, setPendingBodySelection] =
-    useState<CurrentSelection | null>(null);
-  const [followUpSelections, setFollowUpSelections] = useState<
-    Record<number, CurrentSelection | null>
-  >({});
-  const [pendingFollowUpSelections, setPendingFollowUpSelections] = useState<
-    Record<number, CurrentSelection | null>
-  >({});
+  // Cursor selection per editable field. We track these so the markdown
+  // toolbar can insert at the cursor (and wrap a selected range) instead of
+  // always appending at the end. RN doesn't give us programmatic access to
+  // the TextInput selection on read — we mirror it from onSelectionChange.
+  const [bodySelection, setBodySelection] = useState({ start: 0, end: 0 });
+  const [followUpSelection, setFollowUpSelection] = useState({
+    start: 0,
+    end: 0,
+  });
 
   const lastRunIdx = runs.length - 1;
   const hasRuns = runs.length > 0;
@@ -274,17 +257,13 @@ export default function HomeScreen() {
     if (pullHideTimer.current) clearTimeout(pullHideTimer.current);
   }, []);
 
-  // Tap inside the visible strip OR a clear downward pan starting anywhere
-  // in the top ~280px of the editor reveals the bar. The Pan's hitSlop
-  // expands its catch area far below the 24px strip so the user doesn't
-  // have to land their finger inside a tiny target — a natural pull-down
-  // gesture from mid-screen works.
+  // Tap OR downward pan inside the top strip reveals the bar. We compose
+  // them with Race so either gesture independently wins — Pan needs ~8px
+  // of downward travel, Tap fires on quick contact.
   const revealGesture = useMemo(() => {
     const pan = Gesture.Pan()
-      .activeOffsetY([6, 9999])
+      .activeOffsetY([8, 9999])
       .failOffsetY([-9999, -8])
-      .hitSlop({ top: 0, bottom: 280, left: 0, right: 0 })
-      .shouldCancelWhenOutside(false)
       .onStart(() => {
         runOnJS(revealTopBar)();
       })
@@ -473,6 +452,12 @@ export default function HomeScreen() {
   // (setBody → nextPromptSource was still lastFollowUp → canSend was false
   // → handleSend bailed at the top).
   async function handleSend(promptOverride?: string) {
+    // Raw markdown is the dispatch payload — we trim trailing whitespace
+    // only. No formatting strip, no render-then-stringify. Claude reads
+    // the markdown the user actually wrote (headings, bullets, code
+    // fences, links) and treats it as part of the message verbatim. The
+    // buildPrompt wrapper in useDispatch prepends framing but never
+    // mutates the note body itself.
     const candidate = (promptOverride ?? nextPromptSource).trim();
     const canSendNow = candidate.length > 0;
     // eslint-disable-next-line no-console
@@ -660,6 +645,34 @@ export default function HomeScreen() {
     setChipDismissed(true);
   }
 
+  /* ─── Markdown toolbar insertion ────────────────────────────────────
+     Inserts a markdown fragment at the cursor of whichever field is
+     currently the dispatch target — body on first send, last follow-up
+     after. We mirror selection state via onSelectionChange because RN's
+     TextInput has no readable selection prop. If the field isn't focused
+     (selection stale at {0,0}) we still insert at the cursor — for a
+     fresh field that's just "at the start", which is fine. */
+  function applyMarkdown(action: MarkdownAction) {
+    if (isFirstSend) {
+      const next = insertMarkdown(body, bodySelection, action);
+      setBody(next.text);
+      // Re-focus so the keyboard stays up and the cursor lands where we
+      // computed. RN's controlled TextInput will pick up the new selection
+      // on the next render via `selection` if needed — for now we rely on
+      // the user seeing the inserted text and the cursor naturally jumping
+      // to the new end; programmatic selection re-positioning across all
+      // platforms is fragile and not worth the alpha-stage complexity.
+      setBodySelection({ start: next.cursor, end: next.cursor });
+      bodyRef.current?.focus();
+    } else {
+      if (lastRunIdx < 0) return;
+      const next = insertMarkdown(lastFollowUp, followUpSelection, action);
+      updateRunFollowUp(lastRunIdx, next.text);
+      setFollowUpSelection({ start: next.cursor, end: next.cursor });
+      followUpRefs.current[lastRunIdx]?.focus();
+    }
+  }
+
   /* ─── Inbox sheet handlers ──────────────────────────────────────────── */
   function handleSelectNote(noteId: string) {
     setCurrentNoteId(noteId);
@@ -735,32 +748,6 @@ export default function HomeScreen() {
     if (isStreaming) return;
     setInflight(null);
     void handleSend(failedRun.prompt);
-  }
-
-  /* ─── Toolbar markdown actions ─────────────────────────────────────── */
-  // All toolbar buttons route through this dispatcher. It picks the active
-  // input (body when no runs yet, otherwise the most recent follow-up),
-  // applies the InsertResult, and schedules a one-shot selection update so
-  // the cursor lands where the helper computed.
-  function applyMarkdownAction(
-    fn: (text: string, sel: CurrentSelection | null) => InsertResult,
-  ) {
-    if (isFirstSend) {
-      const result = fn(body, bodySelection);
-      setBody(result.value);
-      setPendingBodySelection(result.selection);
-      // Refocus so the keyboard stays up after a toolbar tap (Pressable steals
-      // focus on iOS otherwise).
-      setTimeout(() => bodyRef.current?.focus(), 0);
-      return;
-    }
-    const idx = lastRunIdx;
-    if (idx < 0) return;
-    const current = runs[idx]!.followUp;
-    const result = fn(current, followUpSelections[idx] ?? null);
-    updateRunFollowUp(idx, result.value);
-    setPendingFollowUpSelections((s) => ({ ...s, [idx]: result.selection }));
-    setTimeout(() => followUpRefs.current[idx]?.focus(), 0);
   }
 
   /* ─── Sign out ─────────────────────────────────────────────────────── */
@@ -964,14 +951,12 @@ export default function HomeScreen() {
                 />
               ) : null}
 
-              <LiveMarkdownInput
+              <TextInput
                 ref={bodyRef}
                 value={body}
-                onChangeText={(t) => {
-                  setBody(t);
-                  setPendingBodySelection(null);
-                }}
+                onChangeText={setBody}
                 autoFocus
+                multiline
                 caretHidden={showCaretOverlay}
                 textAlignVertical="top"
                 placeholder={hasContent ? "Write a thought..." : ""}
@@ -979,17 +964,10 @@ export default function HomeScreen() {
                 selectionColor={tokens["accent-caret"]}
                 onFocus={() => setBodyFocused(true)}
                 onBlur={() => setBodyFocused(false)}
+                onSelectionChange={(e) =>
+                  setBodySelection(e.nativeEvent.selection)
+                }
                 scrollEnabled={false}
-                selection={pendingBodySelection ?? undefined}
-                onSelectionChange={(e) => {
-                  setBodySelection(e.nativeEvent.selection);
-                }}
-                theme={{
-                  ink: inkColor,
-                  subtle: subtleColor,
-                  accent: accent,
-                  surfaceChip: surfaceChip,
-                }}
                 style={{
                   minHeight: 80,
                   fontFamily: "Inter-Regular",
@@ -1024,23 +1002,20 @@ export default function HomeScreen() {
               />
               <FollowUpInput
                 value={run.followUp}
-                onChangeText={(t) => {
-                  updateRunFollowUp(idx, t);
-                  setPendingFollowUpSelections((s) => ({ ...s, [idx]: null }));
-                }}
+                onChangeText={(t) => updateRunFollowUp(idx, t)}
+                onSelectionChange={
+                  idx === lastRunIdx
+                    ? (sel) => setFollowUpSelection(sel)
+                    : undefined
+                }
                 placeholder="Ask a follow-up..."
                 placeholderColor={placeholderColor}
                 inkColor={inkColor}
-                subtleColor={subtleColor}
                 caretColor={tokens["accent-caret"]}
                 accentColor={accent}
                 accentOnColor={accentOn}
                 surfaceChipColor={surfaceChip}
                 tertiaryColor={tokens["text-tertiary"]}
-                pendingSelection={pendingFollowUpSelections[idx] ?? null}
-                onSelectionChange={(sel) => {
-                  setFollowUpSelections((s) => ({ ...s, [idx]: sel }));
-                }}
                 inputRef={(r) => {
                   followUpRefs.current[idx] = r;
                 }}
@@ -1081,18 +1056,15 @@ export default function HomeScreen() {
         </ScrollView>
 
         {/* ─── Top-edge reveal strip (S1 only) ─────────────────────────
-            A 24px-tall transparent band pinned to the top edge of the
-            editor. The Pan gesture's hitSlop extends 280px down so a
-            natural pull-down from mid-screen catches even though the
-            visible target is small. We keep the strip mounted for the
-            whole blank-canvas lifetime — unmounting it on `pulledOpen`
-            would tear down an in-flight pan and the bar would never
-            settle. The handle hint hides once the bar is up; pointer
-            events drop so the bar itself owns its taps. */}
-        {!hasContent ? (
+            A 24px-tall transparent band at the very top of the screen.
+            It sits ABOVE the ScrollView/TextInput in z-order so its
+            GestureDetector receives touches the focused body input
+            would otherwise eat. Tap reveals; downward pan reveals. We
+            only mount this when the bar isn't already shown — once it's
+            up, the bar itself is the affordance. */}
+        {!showTopBar ? (
           <GestureDetector gesture={revealGesture}>
             <Animated.View
-              pointerEvents={pulledOpen ? "none" : "auto"}
               style={{
                 position: "absolute",
                 top: 0,
@@ -1104,17 +1076,15 @@ export default function HomeScreen() {
                 justifyContent: "center",
               }}
             >
-              {!pulledOpen ? (
-                <View
-                  style={{
-                    width: 36,
-                    height: 3,
-                    borderRadius: 2,
-                    backgroundColor: borderColor,
-                    opacity: 0.6,
-                  }}
-                />
-              ) : null}
+              <View
+                style={{
+                  width: 36,
+                  height: 3,
+                  borderRadius: 2,
+                  backgroundColor: borderColor,
+                  opacity: 0.6,
+                }}
+              />
             </Animated.View>
           </GestureDetector>
         ) : null}
@@ -1208,120 +1178,170 @@ export default function HomeScreen() {
           </Animated.View>
         ) : null}
 
-        {/* ─── Keyboard toolbar (S2 only) ─────────────────────────────── */}
+        {/* ─── Keyboard toolbar (S2 only) ───────────────────────────────
+            Two-part layout:
+              [ formatting (horizontal scroll) | attach | send ]
+            Formatting inserts markdown at the cursor (line-leading
+            prefixes for headings/lists/quotes; wrappers for bold/italic/
+            code/link). The target field is the body for the first send,
+            otherwise the last follow-up — same routing as handleSend.
+            Send stays as the prominent right-edge ember pill. */}
         {hasContent ? (
           <Animated.View
             entering={SlideInDown.duration(220)}
             exiting={SlideOutDown.duration(160)}
             style={{
-              height: TOOLBAR_HEIGHT,
+              minHeight: TOOLBAR_HEIGHT,
               flexDirection: "row",
               alignItems: "center",
               paddingLeft: 8,
               paddingRight: 12,
+              paddingVertical: 6,
               borderTopWidth: 1,
               borderTopColor: borderColor,
               backgroundColor: canvas,
+              gap: 8,
             }}
           >
-            {/* Scrollable formatting buttons. Horizontal so we can fit a
-                proper formatting palette without cramming the visible width. */}
+            {/* Formatting group — scrolls horizontally because there are
+                more buttons than fit on a phone width. */}
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              keyboardShouldPersistTaps="always"
-              style={{ flex: 1 }}
+              keyboardShouldPersistTaps="handled"
               contentContainerStyle={{
                 alignItems: "center",
-                paddingRight: 8,
+                gap: 2,
+                paddingRight: 4,
               }}
+              style={{ flex: 1 }}
             >
-              <ToolbarButton
-                onPress={() => applyMarkdownAction((v, s) => prefixLine(v, s, "# "))}
+              <MarkdownButton
                 accessibilityLabel="Heading 1"
-                icon={<TextHOneIcon size={20} color={subtleColor} weight="regular" />}
+                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.h1)}
+                icon={
+                  <TextHOneIcon size={20} color={subtleColor} weight="regular" />
+                }
               />
-              <ToolbarButton
-                onPress={() => applyMarkdownAction((v, s) => prefixLine(v, s, "## "))}
+              <MarkdownButton
                 accessibilityLabel="Heading 2"
-                icon={<TextHTwoIcon size={20} color={subtleColor} weight="regular" />}
+                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.h2)}
+                icon={
+                  <TextHTwoIcon size={20} color={subtleColor} weight="regular" />
+                }
               />
-              <ToolbarButton
-                onPress={() => applyMarkdownAction((v, s) => prefixLine(v, s, "### "))}
+              <MarkdownButton
                 accessibilityLabel="Heading 3"
-                icon={<TextHThreeIcon size={20} color={subtleColor} weight="regular" />}
+                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.h3)}
+                icon={
+                  <TextHThreeIcon
+                    size={20}
+                    color={subtleColor}
+                    weight="regular"
+                  />
+                }
               />
               <ToolbarDivider color={borderColor} />
-              <ToolbarButton
-                onPress={() =>
-                  applyMarkdownAction((v, s) => wrapSelection(v, s, "**", "**"))
-                }
+              <MarkdownButton
                 accessibilityLabel="Bold"
+                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.bold)}
                 icon={<TextBIcon size={20} color={subtleColor} weight="bold" />}
               />
-              <ToolbarButton
-                onPress={() =>
-                  applyMarkdownAction((v, s) => wrapSelection(v, s, "*", "*"))
-                }
+              <MarkdownButton
                 accessibilityLabel="Italic"
-                icon={<TextItalicIcon size={20} color={subtleColor} weight="regular" />}
-              />
-              <ToolbarButton
-                onPress={() =>
-                  applyMarkdownAction((v, s) => wrapSelection(v, s, "`", "`"))
+                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.italic)}
+                icon={
+                  <TextItalicIcon
+                    size={20}
+                    color={subtleColor}
+                    weight="regular"
+                  />
                 }
+              />
+              <MarkdownButton
                 accessibilityLabel="Inline code"
+                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.code)}
                 icon={<CodeIcon size={20} color={subtleColor} weight="regular" />}
               />
               <ToolbarDivider color={borderColor} />
-              <ToolbarButton
-                onPress={() => applyMarkdownAction((v, s) => prefixLine(v, s, "- "))}
+              <MarkdownButton
                 accessibilityLabel="Bulleted list"
-                icon={<ListBulletsIcon size={20} color={subtleColor} weight="regular" />}
-              />
-              <ToolbarButton
-                onPress={() => applyMarkdownAction((v, s) => prefixLine(v, s, "1. "))}
-                accessibilityLabel="Numbered list"
-                icon={<ListNumbersIcon size={20} color={subtleColor} weight="regular" />}
-              />
-              <ToolbarButton
-                onPress={() => applyMarkdownAction((v, s) => prefixLine(v, s, "> "))}
-                accessibilityLabel="Blockquote"
-                icon={<QuotesIcon size={20} color={subtleColor} weight="regular" />}
-              />
-              <ToolbarButton
-                onPress={() => applyMarkdownAction((v, s) => insertCodeFence(v, s))}
-                accessibilityLabel="Code block"
-                icon={<CodeBlockIcon size={20} color={subtleColor} weight="regular" />}
-              />
-              <ToolbarButton
-                onPress={() =>
-                  applyMarkdownAction((v, s) =>
-                    // [text](url) — select "text" so it overwrites on first type
-                    insertAtCursor(v, s, "[text](url)", 1, 5),
-                  )
-                }
-                accessibilityLabel="Link"
-                icon={<LinkIcon size={20} color={subtleColor} weight="regular" />}
-              />
-              <ToolbarDivider color={borderColor} />
-              <ToolbarButton
-                onPress={() => {
-                  if (!resolvedNoteId) return;
-                  Keyboard.dismiss();
-                  setAttachmentPickerOpen(true);
-                }}
-                accessibilityLabel="Attach file"
+                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.bullet)}
                 icon={
-                  <PaperclipIcon
+                  <ListBulletsIcon
                     size={20}
-                    color={attachments.length > 0 ? accent : subtleColor}
-                    weight={attachments.length > 0 ? "fill" : "regular"}
+                    color={subtleColor}
+                    weight="regular"
+                  />
+                }
+              />
+              <MarkdownButton
+                accessibilityLabel="Numbered list"
+                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.numbered)}
+                icon={
+                  <ListNumbersIcon
+                    size={20}
+                    color={subtleColor}
+                    weight="regular"
+                  />
+                }
+              />
+              <MarkdownButton
+                accessibilityLabel="Quote"
+                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.quote)}
+                icon={
+                  <QuotesIcon size={20} color={subtleColor} weight="regular" />
+                }
+              />
+              <MarkdownButton
+                accessibilityLabel="Link"
+                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.link)}
+                icon={
+                  <LinkSimpleIcon
+                    size={20}
+                    color={subtleColor}
+                    weight="regular"
                   />
                 }
               />
             </ScrollView>
 
+            {/* Attach — sits in its own group, with a hairline divider
+                separating the formatting group from action affordances. */}
+            <View
+              style={{
+                width: 1,
+                height: 24,
+                backgroundColor: borderColor,
+              }}
+            />
+            <Pressable
+              onPress={() => {
+                if (!resolvedNoteId) return;
+                Keyboard.dismiss();
+                setAttachmentPickerOpen(true);
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Attach file"
+              style={({ pressed }) => ({
+                width: 40,
+                height: 40,
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: 10,
+                opacity: pressed ? 0.55 : 1,
+                transform: [{ scale: pressed ? 0.94 : 1 }],
+              })}
+            >
+              <PaperclipIcon
+                size={20}
+                color={attachments.length > 0 ? accent : subtleColor}
+                weight={attachments.length > 0 ? "fill" : "regular"}
+              />
+            </Pressable>
+
+            {/* Send — keep the prominent ember pill. Slightly larger
+                (40×40) to match the new touch-target rhythm. */}
             <Pressable
               onPress={isStreaming ? handleStop : () => void handleSend()}
               disabled={!isStreaming && !canSend}
@@ -1329,15 +1349,19 @@ export default function HomeScreen() {
               accessibilityState={{ disabled: !isStreaming && !canSend }}
               accessibilityLabel={isStreaming ? "Stop dispatch" : "Send note"}
               style={({ pressed }) => ({
-                width: 36,
-                height: 36,
-                borderRadius: 18,
-                marginLeft: 8,
+                width: 40,
+                height: 40,
+                borderRadius: 20,
                 alignItems: "center",
                 justifyContent: "center",
                 backgroundColor: isStreaming || canSend ? accent : surfaceChip,
                 opacity: isStreaming || canSend ? 1 : 0.6,
                 transform: [{ scale: pressed ? 0.94 : 1 }],
+                shadowColor: "#000",
+                shadowOpacity: canSend ? 0.18 : 0,
+                shadowRadius: 6,
+                shadowOffset: { width: 0, height: 2 },
+                elevation: canSend ? 3 : 0,
               })}
             >
               {isStreaming ? (
@@ -1556,40 +1580,44 @@ function IconButton(props: {
   );
 }
 
-function ToolbarButton(props: {
+/** Square 40×40 markdown-insert button. Spring-press feedback + hairline
+ *  rounded background on press so taps feel deliberate. Used inside the
+ *  horizontally-scrolling formatting row in the keyboard toolbar. */
+function MarkdownButton(props: {
   onPress: () => void;
   accessibilityLabel: string;
-  icon?: React.ReactNode;
-  content?: React.ReactNode;
+  icon: React.ReactNode;
 }) {
   return (
     <Pressable
       onPress={props.onPress}
       accessibilityRole="button"
       accessibilityLabel={props.accessibilityLabel}
+      hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}
       style={({ pressed }) => ({
-        width: 36,
-        height: 36,
+        width: 40,
+        height: 40,
         alignItems: "center",
         justifyContent: "center",
         borderRadius: 8,
-        marginHorizontal: 1,
-        backgroundColor: pressed ? "rgba(0,0,0,0.06)" : "transparent",
+        opacity: pressed ? 0.55 : 1,
+        transform: [{ scale: pressed ? 0.94 : 1 }],
       })}
     >
-      {props.content ?? props.icon}
+      {props.icon}
     </Pressable>
   );
 }
 
-function ToolbarDivider({ color }: { color: string }) {
+/** Vertical hairline divider between toolbar groups. */
+function ToolbarDivider(props: { color: string }) {
   return (
     <View
       style={{
         width: 1,
-        height: 20,
-        backgroundColor: color,
-        marginHorizontal: 6,
+        height: 18,
+        backgroundColor: props.color,
+        marginHorizontal: 4,
         opacity: 0.7,
       }}
     />
@@ -1599,17 +1627,17 @@ function ToolbarDivider({ color }: { color: string }) {
 function FollowUpInput(props: {
   value: string;
   onChangeText: (s: string) => void;
+  /** Selection mirror — only wired up for the last follow-up, since that's
+   *  the only one the toolbar can insert into. */
+  onSelectionChange?: (sel: { start: number; end: number }) => void;
   placeholder: string;
   placeholderColor: string;
   inkColor: string;
-  subtleColor: string;
   caretColor: string;
   accentColor: string;
   accentOnColor: string;
   surfaceChipColor: string;
   tertiaryColor: string;
-  pendingSelection: CurrentSelection | null;
-  onSelectionChange: (sel: CurrentSelection) => void;
   inputRef: (r: TextInput | null) => void;
   isLast: boolean;
   /** Only render the inline send button under the LAST follow-up — that's
@@ -1632,26 +1660,22 @@ function FollowUpInput(props: {
         gap: 10,
       }}
     >
-      <LiveMarkdownInput
+      <TextInput
         ref={props.inputRef}
         value={props.value}
         onChangeText={props.onChangeText}
         onFocus={props.onFocus}
+        onSelectionChange={
+          props.onSelectionChange
+            ? (e) => props.onSelectionChange!(e.nativeEvent.selection)
+            : undefined
+        }
+        multiline
         placeholder={props.placeholder}
         placeholderTextColor={props.placeholderColor}
         selectionColor={props.caretColor}
         scrollEnabled={false}
         textAlignVertical="top"
-        selection={props.pendingSelection ?? undefined}
-        onSelectionChange={(e) =>
-          props.onSelectionChange(e.nativeEvent.selection)
-        }
-        theme={{
-          ink: props.inkColor,
-          subtle: props.subtleColor,
-          accent: props.accentColor,
-          surfaceChip: props.surfaceChipColor,
-        }}
         style={{
           flex: 1,
           minHeight: 40,
@@ -1856,6 +1880,101 @@ function inflightToBlockState(run: InflightRun): AgentRunBlockState {
     costUsd: run.costUsd,
     error: run.error,
   };
+}
+
+/* ─── Markdown insertion ──────────────────────────────────────────────
+   Two insertion styles, matched to how each markdown element wants to
+   live in the document:
+
+     - "linePrefix" — headings, bullets, numbered, quote. The prefix
+       belongs at the START of a line. We find the line containing the
+       cursor and prepend the prefix there (idempotent-ish: if the user
+       hits H1 twice we stack `# # ` — that's fine, the user can backspace
+       and it matches how desktop editors behave).
+     - "wrap"       — bold, italic, code, link. If the user has selected
+       text, we wrap it. Otherwise we insert the marker pair and drop the
+       cursor in the middle so they can start typing.
+
+   We compute and return the resulting text + final cursor position so
+   the caller can mirror selection state forward. */
+
+type MarkdownAction =
+  | { kind: "linePrefix"; prefix: string }
+  | { kind: "wrap"; left: string; right: string; placeholder?: string }
+  | { kind: "link" };
+
+const MARKDOWN_ACTIONS: Record<string, MarkdownAction> = {
+  h1: { kind: "linePrefix", prefix: "# " },
+  h2: { kind: "linePrefix", prefix: "## " },
+  h3: { kind: "linePrefix", prefix: "### " },
+  bullet: { kind: "linePrefix", prefix: "- " },
+  numbered: { kind: "linePrefix", prefix: "1. " },
+  quote: { kind: "linePrefix", prefix: "> " },
+  bold: { kind: "wrap", left: "**", right: "**", placeholder: "bold" },
+  italic: { kind: "wrap", left: "*", right: "*", placeholder: "italic" },
+  code: { kind: "wrap", left: "`", right: "`", placeholder: "code" },
+  link: { kind: "link" },
+};
+
+interface InsertResult {
+  text: string;
+  cursor: number;
+}
+
+function insertMarkdown(
+  current: string,
+  selection: { start: number; end: number },
+  action: MarkdownAction,
+): InsertResult {
+  const start = Math.max(0, Math.min(selection.start, current.length));
+  const end = Math.max(start, Math.min(selection.end, current.length));
+
+  if (action.kind === "linePrefix") {
+    // Find the start of the current line.
+    let lineStart = start;
+    while (lineStart > 0 && current[lineStart - 1] !== "\n") lineStart--;
+    const before = current.slice(0, lineStart);
+    const after = current.slice(lineStart);
+    const text = `${before}${action.prefix}${after}`;
+    return { text, cursor: lineStart + action.prefix.length };
+  }
+
+  if (action.kind === "wrap") {
+    const selected = current.slice(start, end);
+    if (selected.length > 0) {
+      const text =
+        current.slice(0, start) +
+        action.left +
+        selected +
+        action.right +
+        current.slice(end);
+      return {
+        text,
+        cursor: end + action.left.length + action.right.length,
+      };
+    }
+    const placeholder = action.placeholder ?? "";
+    const inner = placeholder;
+    const text =
+      current.slice(0, start) +
+      action.left +
+      inner +
+      action.right +
+      current.slice(end);
+    // Drop cursor right after the left marker so the user can start
+    // typing over the placeholder. (We don't pre-select it because RN's
+    // controlled selection across iOS/Android is finicky.)
+    return { text, cursor: start + action.left.length };
+  }
+
+  // Link: `[text](url)`. If text selected, use it as the label.
+  const selected = current.slice(start, end);
+  const label = selected.length > 0 ? selected : "text";
+  const insertion = `[${label}](url)`;
+  const text = current.slice(0, start) + insertion + current.slice(end);
+  // Cursor lands on "url" so the user can replace it immediately.
+  const urlStart = start + label.length + 3; // "[" + label + "](" → 3 chars after label
+  return { text, cursor: urlStart };
 }
 
 /** Phase 2 stub for dispatch detection — grabs the first ticket-like token
