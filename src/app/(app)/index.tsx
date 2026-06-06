@@ -49,6 +49,8 @@ import Animated, {
   SlideOutDown,
 } from "react-native-reanimated";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
+import { runOnJS } from "react-native-reanimated";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ArrowUpIcon,
@@ -199,16 +201,57 @@ export default function HomeScreen() {
     isBodyEmpty && isTitleEmpty && !hasRuns && !inflight;
   const hasContent = !noUserInputYet;
 
-  // Scroll-reveal for the top bar on the blank canvas. The bar normally only
-  // shows once the note has content, so a fresh note opens with a quiet
-  // header-less surface. Pulling the scroll view down past PULL_REVEAL_PX
-  // (iOS overscroll bounce, or Android drag against an empty content area)
-  // brings the bar in temporarily — gives the user a way to reach Inbox /
-  // Search / ⋮ without first having to type something.
-  const [scrollOffsetY, setScrollOffsetY] = useState(0);
+  // Pull-to-reveal for the top bar on the blank canvas. The bar normally
+  // only shows once the note has content, so a fresh note opens quiet.
+  // A downward pan past PULL_REVEAL_PX brings the bar in; we auto-hide it
+  // ~3s after the gesture ends so the canvas goes back to clean.
+  //
+  // We use a real PanGesture (not ScrollView's onScroll) because the body
+  // TextInput autoFocuses and swallows pan gestures — onScroll never sees
+  // any negative offset while the keyboard is up. The pan gesture activates
+  // only after 20px of net downward motion, so single-point taps still
+  // route to the TextInput for cursor placement.
+  const [pulledOpen, setPulledOpen] = useState(false);
+  const pullHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const PULL_REVEAL_PX = 28;
-  const showTopBarFromScroll = scrollOffsetY <= -PULL_REVEAL_PX;
-  const showTopBar = hasContent || showTopBarFromScroll;
+  const PULL_HIDE_DELAY_MS = 3000;
+
+  const showTopBar = hasContent || pulledOpen;
+
+  function schedulePullHide() {
+    if (pullHideTimer.current) clearTimeout(pullHideTimer.current);
+    pullHideTimer.current = setTimeout(() => {
+      setPulledOpen(false);
+      pullHideTimer.current = null;
+    }, PULL_HIDE_DELAY_MS);
+  }
+
+  function revealTopBar() {
+    setPulledOpen(true);
+    schedulePullHide();
+  }
+
+  useEffect(() => () => {
+    if (pullHideTimer.current) clearTimeout(pullHideTimer.current);
+  }, []);
+
+  const revealPanGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        // Only activate on a clear downward drag — keeps taps on the
+        // TextInput from triggering the bar.
+        .activeOffsetY([20, 9999])
+        .failOffsetY([-9999, -10])
+        .onUpdate((e) => {
+          if (e.translationY >= PULL_REVEAL_PX) {
+            runOnJS(revealTopBar)();
+          }
+        })
+        .onEnd(() => {
+          runOnJS(schedulePullHide)();
+        }),
+    [],
+  );
 
   // What the next send would use as a prompt.
   const nextPromptSource = isFirstSend ? body : lastFollowUp;
@@ -779,7 +822,13 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
-        {/* ─── Editor body ────────────────────────────────────────────── */}
+        {/* ─── Editor body ────────────────────────────────────────────
+            Wrapped in GestureDetector so a downward pan reveals the top
+            bar on the blank canvas (S1) — the focused body TextInput
+            would otherwise swallow the gesture and the bar would never
+            appear. activeOffsetY=[20, 9999] keeps small taps routing to
+            the TextInput for cursor placement. */}
+        <GestureDetector gesture={revealPanGesture}>
         <ScrollView
           ref={scrollRef}
           style={{ flex: 1 }}
@@ -793,20 +842,6 @@ export default function HomeScreen() {
             flexGrow: 1,
           }}
           keyboardShouldPersistTaps="handled"
-          // Drive showTopBarFromScroll. 16ms throttle matches a 60Hz refresh
-          // so we don't fire on every native pixel of pan but still react in
-          // the same frame the bar should appear.
-          onScroll={(e) =>
-            setScrollOffsetY(e.nativeEvent.contentOffset.y)
-          }
-          scrollEventThrottle={16}
-          // Bounces=true is the iOS default but needed explicitly so the
-          // empty S1 canvas has a pull-to-reveal affordance even when
-          // content fits the viewport. Android equivalent is the
-          // overscroll glow + pan; we still get negative offsets there.
-          bounces
-          alwaysBounceVertical
-          overScrollMode="always"
         >
           <TextInput
             value={title}
@@ -958,6 +993,7 @@ export default function HomeScreen() {
             />
           ) : null}
         </ScrollView>
+        </GestureDetector>
 
         {/* ─── Confidence chip (S13) ──────────────────────────────────── */}
         {showChip ? (
