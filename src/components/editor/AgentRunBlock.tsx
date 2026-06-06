@@ -502,45 +502,40 @@ function ToolDrawer({
   accent: string;
 }) {
   return (
-    <View
-      style={{
-        borderBottomWidth: open ? 1 : 0,
-        borderBottomColor: border,
-        backgroundColor: open ? "transparent" : undefined,
-      }}
-    >
+    <View>
+      {/* Drawer header — sits on the agent surface, no border, just a
+       *  tappable row. Visually it reads as "this is a section divider",
+       *  not "this is a card". */}
       <Pressable
         onPress={onToggle}
         accessibilityRole="button"
         accessibilityLabel={open ? "Hide tool calls" : "Show tool calls"}
         style={({ pressed }) => ({
           paddingHorizontal: 14,
-          paddingVertical: 10,
+          paddingTop: 12,
+          paddingBottom: 8,
           flexDirection: "row",
           alignItems: "center",
           gap: 8,
           opacity: pressed ? 0.7 : 1,
         })}
       >
-        <WrenchIcon size={13} color={accent} weight="regular" />
         <Text
           style={{
-            fontFamily: "Inter-SemiBold",
-            fontSize: 12,
-            color: ink,
-            letterSpacing: -0.1,
+            fontFamily: "Inter-Medium",
+            fontSize: 10.5,
+            color: tertiary,
+            letterSpacing: 1.2,
+            textTransform: "uppercase",
           }}
         >
-          {`Tools (${calls.length})`}
+          {`${calls.length} ${calls.length === 1 ? "tool" : "tools"}`}
         </Text>
-        {/* Spacer — chips removed: when this drawer is closed we keep the
-         *  header minimal, the outer collapsed summary already shows the
-         *  "+N tools" hint. */}
         <View style={{ flex: 1 }} />
         {open ? (
-          <CaretDownIcon size={12} color={tertiary} weight="bold" />
+          <CaretDownIcon size={11} color={tertiary} weight="bold" />
         ) : (
-          <CaretRightIcon size={12} color={tertiary} weight="bold" />
+          <CaretRightIcon size={11} color={tertiary} weight="bold" />
         )}
       </Pressable>
 
@@ -548,8 +543,8 @@ function ToolDrawer({
         <Animated.View
           entering={FadeIn.duration(160)}
           style={{
-            paddingHorizontal: 10,
-            paddingBottom: 10,
+            paddingHorizontal: 14,
+            paddingBottom: 8,
           }}
         >
           <ToolCompaction calls={calls} />

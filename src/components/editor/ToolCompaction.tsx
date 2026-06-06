@@ -1,23 +1,41 @@
 /**
  * Wend — ToolCompaction.
  *
- * Groups consecutive same-kind tool calls inside the tool drawer so a
- * long run (e.g. 8 Edits + 4 Reads + 2 Bash) collapses into 3 rows
- * instead of 14. Mixed sequences still render individually but adjacent
- * same-kind runs collapse.
+ * The tool drawer's inner content. Renders Claude's tool calls as a
+ * clean IDE-style list:
  *
- * Each grouped row is tap-to-expand: tapping reveals the per-call input
- * preview (file path / command / etc.) as a sub-list. Single-call rows
- * render the same card as before — no extra chrome.
+ *   - Each row is icon + label + (optional) target — no borders, no
+ *     per-row cards, no debug-log numbering.
+ *   - Consecutive same-kind calls compact into a single row ("Edited 8
+ *     files") with a chevron to expand and see each one.
+ *   - File path / command targets render in mono-tertiary as a subtle
+ *     secondary line; everything else uses Inter.
+ *   - Icons are kind-mapped: pencil for Edit, eye for Read, terminal
+ *     for Bash, magnifier for search, etc.
  *
- * The grouping helper `compactToolCalls` is exported standalone for
- * testing and for any other surface that wants the same compaction.
+ * `compactToolCalls` is exported standalone so any other surface that
+ * wants the same grouping (notification subtitle, history view) can
+ * reuse it without dragging the React component along.
  */
 
 import { useMemo, useState } from "react";
 import { Pressable, View } from "react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
-import { CaretDownIcon, CaretRightIcon } from "phosphor-react-native";
+import {
+  CaretDownIcon,
+  CaretRightIcon,
+  CodeIcon,
+  EyeIcon,
+  FilePlusIcon,
+  GlobeIcon,
+  LightningIcon,
+  MagnifyingGlassIcon,
+  NotebookIcon,
+  PencilSimpleIcon,
+  TerminalIcon,
+  WrenchIcon,
+  type Icon as PhosphorIcon,
+} from "phosphor-react-native";
 
 import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
@@ -30,9 +48,8 @@ export type CompactedGroup =
   | { kind: "group"; name: string; calls: ToolCall[] };
 
 /**
- * Groups consecutive calls with the same `name` into a single CompactedGroup.
- * Only groups runs of 2+ — a lone call between two different-named calls
- * stays as a "single" row to avoid empty-looking expanders.
+ * Groups consecutive calls with the same `name`. Runs of 2+ collapse into
+ * an expandable group; lone calls stay as single rows.
  */
 export function compactToolCalls(calls: ToolCall[]): CompactedGroup[] {
   const out: CompactedGroup[] = [];
@@ -52,50 +69,55 @@ export function compactToolCalls(calls: ToolCall[]): CompactedGroup[] {
   return out;
 }
 
-/* ─── Verbing — turn "Edit" into "Edited", "Read" into "Read" ──────────── */
+/* ─── Tool-kind → icon + label ──────────────────────────────────────────── */
 
-function verbForGroup(name: string, count: number): string {
-  // Map common Claude tool names to a natural past-tense action phrase.
-  // Anything we don't recognize gets a generic "<Name> called N times".
+/** Returns the icon component, a short verb (e.g. "Edited"), and a noun
+ *  (e.g. "files") for a given tool name. The verb is what the row reads
+ *  as for the user; noun pluralizes with count. */
+function metaFor(name: string): {
+  Icon: PhosphorIcon;
+  singularVerb: string;
+  pastVerb: string;
+  noun: string;
+} {
   const lower = name.toLowerCase();
   switch (lower) {
     case "edit":
     case "multiedit":
-      return `Edited ${count} files`;
+      return { Icon: PencilSimpleIcon, singularVerb: "Edit", pastVerb: "Edited", noun: "files" };
     case "write":
     case "create":
-      return `Wrote ${count} files`;
+      return { Icon: FilePlusIcon, singularVerb: "Wrote", pastVerb: "Wrote", noun: "files" };
     case "read":
-      return `Read ${count} files`;
+      return { Icon: EyeIcon, singularVerb: "Read", pastVerb: "Read", noun: "files" };
     case "bash":
-      return `Ran ${count} commands`;
+      return { Icon: TerminalIcon, singularVerb: "Ran", pastVerb: "Ran", noun: "commands" };
     case "glob":
-      return `Searched with ${count} globs`;
+      return { Icon: MagnifyingGlassIcon, singularVerb: "Searched", pastVerb: "Searched", noun: "globs" };
     case "grep":
-      return `Ran ${count} searches`;
+      return { Icon: MagnifyingGlassIcon, singularVerb: "Searched", pastVerb: "Searched", noun: "patterns" };
     case "webfetch":
-      return `Fetched ${count} URLs`;
+      return { Icon: GlobeIcon, singularVerb: "Fetched", pastVerb: "Fetched", noun: "URLs" };
     case "websearch":
-      return `Ran ${count} web searches`;
+      return { Icon: GlobeIcon, singularVerb: "Searched", pastVerb: "Searched", noun: "queries" };
     case "task":
     case "agent":
-      return `Ran ${count} subagents`;
+      return { Icon: LightningIcon, singularVerb: "Ran", pastVerb: "Ran", noun: "subagents" };
     case "notebookedit":
-      return `Edited ${count} notebook cells`;
+      return { Icon: NotebookIcon, singularVerb: "Edited", pastVerb: "Edited", noun: "cells" };
+    case "code":
+      return { Icon: CodeIcon, singularVerb: "Wrote", pastVerb: "Wrote", noun: "snippets" };
     default:
-      return `${name} ×${count}`;
+      return { Icon: WrenchIcon, singularVerb: name, pastVerb: name, noun: "calls" };
   }
 }
 
-/* ─── Per-call preview text ────────────────────────────────────────────── */
+/* ─── Per-call target extraction ────────────────────────────────────────── */
 
-/**
- * Produce a 1-line preview line for a tool call within a grouped sub-list.
- * Mirrors AgentRunBlock.summarizeToolInput but tuned for the sub-list
- * context — we drop the "key: " prefix and just show the value, since the
- * group header already establishes what kind of call this is.
- */
-function previewForCall(call: ToolCall): string | null {
+/** Returns a short, user-facing target string for a tool call — typically
+ *  the file path / command / query the call operated on. Returns null when
+ *  the input has nothing relatable. */
+function targetFor(call: ToolCall): string | null {
   const input = call.input;
   if (input == null) return null;
   if (typeof input === "string") return input;
@@ -113,15 +135,27 @@ function previewForCall(call: ToolCall): string | null {
     const v = obj[key];
     if (typeof v === "string" && v.length > 0) return v;
   }
-  try {
-    const json = JSON.stringify(obj);
-    return json.length > 120 ? json.slice(0, 119) + "…" : json;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
-/* ─── Components ───────────────────────────────────────────────────────── */
+/** Compact a file path to "…/parent/file.ts" so long absolute paths don't
+ *  bust the row layout. Leaves short paths alone. */
+function shortenPath(path: string, maxLen = 44): string {
+  if (path.length <= maxLen) return path;
+  const segments = path.split("/").filter(Boolean);
+  if (segments.length <= 2) {
+    // Single very long segment — truncate with ellipsis from the LEFT so
+    // the actual filename remains visible.
+    return "…" + path.slice(path.length - (maxLen - 1));
+  }
+  // Keep last 2 segments — `parent/file.ext` — prefixed with ellipsis.
+  const tail = segments.slice(-2).join("/");
+  const short = "…/" + tail;
+  if (short.length <= maxLen) return short;
+  return "…/" + tail.slice(tail.length - (maxLen - 2));
+}
+
+/* ─── Public render component ───────────────────────────────────────────── */
 
 export interface ToolCompactionProps {
   calls: ToolCall[];
@@ -129,221 +163,217 @@ export interface ToolCompactionProps {
 
 export function ToolCompaction({ calls }: ToolCompactionProps) {
   const groups = useMemo(() => compactToolCalls(calls), [calls]);
-
   return (
-    <View style={{ gap: 6 }}>
+    <View>
       {groups.map((g, i) =>
         g.kind === "group" ? (
-          <GroupRow key={`g-${i}`} group={g} startIndex={startIndexFor(groups, i)} />
+          <GroupRow key={`g-${i}`} group={g} />
         ) : (
-          <SingleRow key={`s-${i}`} call={g.call} index={startIndexFor(groups, i) + 1} />
+          <SingleRow key={`s-${i}`} call={g.call} />
         ),
       )}
     </View>
   );
 }
 
-/**
- * Compute the 1-based index of the first call in group `i`. Used to keep
- * the numeric index consistent across compacted + expanded sub-lists so
- * a user can tell "this was the 7th tool call" at a glance.
- */
-function startIndexFor(groups: CompactedGroup[], i: number): number {
-  let n = 0;
-  for (let k = 0; k < i; k++) {
-    const g = groups[k]!;
-    n += g.kind === "single" ? 1 : g.calls.length;
+/* ─── Atomic row primitives ─────────────────────────────────────────────── */
+
+function RowFrame({
+  onPress,
+  children,
+}: {
+  onPress?: () => void;
+  children: React.ReactNode;
+}) {
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        style={({ pressed }) => ({
+          opacity: pressed ? 0.6 : 1,
+        })}
+      >
+        <View
+          style={{
+            paddingHorizontal: 4,
+            paddingVertical: 8,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
+          {children}
+        </View>
+      </Pressable>
+    );
   }
-  return n;
-}
-
-/* ─── Single-call row (same look as the old ToolCallCard) ──────────────── */
-
-function SingleRow({ call, index }: { call: ToolCall; index: number }) {
-  const { tokens } = useTheme();
-  const preview = useMemo(() => previewForCall(call), [call]);
-  const previewKey = useMemo(() => previewKeyFor(call), [call]);
   return (
     <View
       style={{
-        borderWidth: 1,
-        borderColor: tokens["border-hairline"],
-        borderRadius: 10,
-        paddingHorizontal: 10,
+        paddingHorizontal: 4,
         paddingVertical: 8,
-        backgroundColor: tokens["surface-elevated"],
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-        <Text
-          style={{
-            fontFamily: "JetBrainsMono-Medium",
-            fontSize: 10.5,
-            color: tokens["text-tertiary"],
-            minWidth: 18,
-          }}
-        >
-          {String(index).padStart(2, "0")}
-        </Text>
-        <Text
-          style={{
-            fontFamily: "JetBrainsMono-Medium",
-            fontSize: 12,
-            color: tokens["text-primary"],
-            letterSpacing: -0.2,
-          }}
-        >
-          {call.name}
-        </Text>
-      </View>
-      {preview ? (
-        <Text
-          numberOfLines={2}
-          style={{
-            marginTop: 4,
-            marginLeft: 24,
-            fontFamily: "JetBrainsMono",
-            fontSize: 11,
-            lineHeight: 16,
-            color: tokens["text-secondary"],
-          }}
-        >
-          {previewKey ? `${previewKey}: ${preview}` : preview}
-        </Text>
-      ) : null}
+      {children}
     </View>
   );
 }
 
-function previewKeyFor(call: ToolCall): string | null {
-  const input = call.input;
-  if (input == null || typeof input !== "object") return null;
-  const obj = input as Record<string, unknown>;
-  for (const key of [
-    "file_path",
-    "path",
-    "command",
-    "query",
-    "pattern",
-    "url",
-    "description",
-  ]) {
-    if (typeof obj[key] === "string") return key;
-  }
-  return null;
+function IconWell({
+  Icon,
+  color,
+  bg,
+}: {
+  Icon: PhosphorIcon;
+  color: string;
+  bg: string;
+}) {
+  return (
+    <View
+      style={{
+        width: 26,
+        height: 26,
+        borderRadius: 7,
+        backgroundColor: bg,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Icon size={14} color={color} weight="regular" />
+    </View>
+  );
+}
+
+/* ─── Single-call row ──────────────────────────────────────────────────── */
+
+function SingleRow({ call }: { call: ToolCall }) {
+  const { tokens } = useTheme();
+  const meta = useMemo(() => metaFor(call.name), [call.name]);
+  const target = useMemo(() => targetFor(call), [call]);
+  const isPath = target != null && target.includes("/");
+  const display = useMemo(
+    () => (target && isPath ? shortenPath(target) : target),
+    [target, isPath],
+  );
+
+  return (
+    <RowFrame>
+      <IconWell
+        Icon={meta.Icon}
+        color={tokens["accent-default"]}
+        bg={`${tokens["accent-default"]}14`}
+      />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text
+          style={{
+            fontFamily: "Inter-SemiBold",
+            fontSize: 13,
+            color: tokens["text-primary"],
+            letterSpacing: -0.1,
+          }}
+          numberOfLines={1}
+        >
+          {meta.singularVerb}
+          {display ? "" : "…"}
+        </Text>
+        {display ? (
+          <Text
+            style={{
+              marginTop: 1,
+              fontFamily: isPath ? "JetBrainsMono" : "Inter-Regular",
+              fontSize: 11.5,
+              lineHeight: 15,
+              color: tokens["text-tertiary"],
+            }}
+            numberOfLines={1}
+          >
+            {display}
+          </Text>
+        ) : null}
+      </View>
+    </RowFrame>
+  );
 }
 
 /* ─── Grouped row — tap to expand sub-list ─────────────────────────────── */
 
 function GroupRow({
   group,
-  startIndex,
 }: {
   group: Extract<CompactedGroup, { kind: "group" }>;
-  startIndex: number;
 }) {
   const { tokens } = useTheme();
   const [open, setOpen] = useState(false);
-  const label = useMemo(
-    () => verbForGroup(group.name, group.calls.length),
-    [group],
-  );
+  const meta = useMemo(() => metaFor(group.name), [group.name]);
 
   return (
-    <View
-      style={{
-        borderWidth: 1,
-        borderColor: tokens["border-hairline"],
-        borderRadius: 10,
-        backgroundColor: tokens["surface-elevated"],
-        overflow: "hidden",
-      }}
-    >
-      <Pressable
-        onPress={() => setOpen((v) => !v)}
-        accessibilityRole="button"
-        accessibilityLabel={open ? `Hide ${group.name} sub-list` : `Show ${group.name} sub-list`}
-        style={({ pressed }) => ({
-          paddingHorizontal: 10,
-          paddingVertical: 8,
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 6,
-          opacity: pressed ? 0.7 : 1,
-        })}
-      >
-        <Text
-          style={{
-            fontFamily: "JetBrainsMono-Medium",
-            fontSize: 10.5,
-            color: tokens["text-tertiary"],
-            minWidth: 18,
-          }}
-        >
-          {String(startIndex + 1).padStart(2, "0")}
-        </Text>
-        <Text
-          style={{
-            fontFamily: "Inter-SemiBold",
-            fontSize: 12.5,
-            color: tokens["text-primary"],
-            letterSpacing: -0.1,
-          }}
-        >
-          {label}
-        </Text>
-        <View style={{ flex: 1 }} />
+    <View>
+      <RowFrame onPress={() => setOpen((v) => !v)}>
+        <IconWell
+          Icon={meta.Icon}
+          color={tokens["accent-default"]}
+          bg={`${tokens["accent-default"]}14`}
+        />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text
+            style={{
+              fontFamily: "Inter-SemiBold",
+              fontSize: 13,
+              color: tokens["text-primary"],
+              letterSpacing: -0.1,
+            }}
+            numberOfLines={1}
+          >
+            {meta.pastVerb} {group.calls.length} {meta.noun}
+          </Text>
+        </View>
         {open ? (
-          <CaretDownIcon size={12} color={tokens["text-tertiary"]} weight="bold" />
+          <CaretDownIcon
+            size={12}
+            color={tokens["text-tertiary"]}
+            weight="bold"
+          />
         ) : (
-          <CaretRightIcon size={12} color={tokens["text-tertiary"]} weight="bold" />
+          <CaretRightIcon
+            size={12}
+            color={tokens["text-tertiary"]}
+            weight="bold"
+          />
         )}
-      </Pressable>
+      </RowFrame>
       {open ? (
         <Animated.View
-          entering={FadeIn.duration(140)}
+          entering={FadeIn.duration(120)}
           style={{
-            paddingHorizontal: 10,
-            paddingBottom: 8,
-            paddingTop: 0,
-            gap: 2,
-            borderTopWidth: 1,
-            borderTopColor: tokens["border-hairline"],
+            paddingLeft: 40, // icon (26) + gap (10) + frame padding (4)
+            paddingBottom: 4,
           }}
         >
           {group.calls.map((c, i) => {
-            const preview = previewForCall(c);
+            const target = targetFor(c);
+            const isPath = target != null && target.includes("/");
+            const display = target && isPath ? shortenPath(target, 50) : target;
             return (
               <View
                 key={i}
                 style={{
-                  flexDirection: "row",
-                  alignItems: "flex-start",
-                  paddingTop: 6,
-                  gap: 8,
+                  paddingVertical: 4,
                 }}
               >
                 <Text
+                  numberOfLines={1}
                   style={{
-                    fontFamily: "JetBrainsMono-Medium",
-                    fontSize: 10.5,
-                    color: tokens["text-tertiary"],
-                    minWidth: 18,
-                  }}
-                >
-                  {String(startIndex + 1 + i).padStart(2, "0")}
-                </Text>
-                <Text
-                  numberOfLines={2}
-                  style={{
-                    flex: 1,
-                    fontFamily: "JetBrainsMono",
+                    fontFamily: isPath ? "JetBrainsMono" : "Inter-Regular",
                     fontSize: 11.5,
-                    lineHeight: 17,
+                    lineHeight: 16,
                     color: tokens["text-secondary"],
                   }}
                 >
-                  {preview ?? "(no input)"}
+                  {display ?? "—"}
                 </Text>
               </View>
             );
