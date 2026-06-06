@@ -1,6 +1,6 @@
 # Wend — mobile app
 
-> Notes you can send.
+> Notes that act.
 
 The Expo client. Captures notes on your phone and dispatches them to Claude
 Code running on your Mac (via the [spike daemon](../spike/daemon.mjs)

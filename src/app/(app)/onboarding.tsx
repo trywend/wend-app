@@ -135,7 +135,7 @@ export default function OnboardingScreen() {
               maxWidth: 320,
             }}
           >
-            Notes you can send. Drop a thought from your phone and your Mac
+            Notes that act. Drop a thought from your phone and your Mac
             picks it up — Claude runs it in the right project, in the
             background.
           </Text>
