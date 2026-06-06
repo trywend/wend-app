@@ -274,13 +274,17 @@ export default function HomeScreen() {
     if (pullHideTimer.current) clearTimeout(pullHideTimer.current);
   }, []);
 
-  // Tap OR downward pan inside the top strip reveals the bar. We compose
-  // them with Race so either gesture independently wins — Pan needs ~8px
-  // of downward travel, Tap fires on quick contact.
+  // Tap inside the visible strip OR a clear downward pan starting anywhere
+  // in the top ~280px of the editor reveals the bar. The Pan's hitSlop
+  // expands its catch area far below the 24px strip so the user doesn't
+  // have to land their finger inside a tiny target — a natural pull-down
+  // gesture from mid-screen works.
   const revealGesture = useMemo(() => {
     const pan = Gesture.Pan()
-      .activeOffsetY([8, 9999])
+      .activeOffsetY([6, 9999])
       .failOffsetY([-9999, -8])
+      .hitSlop({ top: 0, bottom: 280, left: 0, right: 0 })
+      .shouldCancelWhenOutside(false)
       .onStart(() => {
         runOnJS(revealTopBar)();
       })
@@ -1077,15 +1081,18 @@ export default function HomeScreen() {
         </ScrollView>
 
         {/* ─── Top-edge reveal strip (S1 only) ─────────────────────────
-            A 24px-tall transparent band at the very top of the screen.
-            It sits ABOVE the ScrollView/TextInput in z-order so its
-            GestureDetector receives touches the focused body input
-            would otherwise eat. Tap reveals; downward pan reveals. We
-            only mount this when the bar isn't already shown — once it's
-            up, the bar itself is the affordance. */}
-        {!showTopBar ? (
+            A 24px-tall transparent band pinned to the top edge of the
+            editor. The Pan gesture's hitSlop extends 280px down so a
+            natural pull-down from mid-screen catches even though the
+            visible target is small. We keep the strip mounted for the
+            whole blank-canvas lifetime — unmounting it on `pulledOpen`
+            would tear down an in-flight pan and the bar would never
+            settle. The handle hint hides once the bar is up; pointer
+            events drop so the bar itself owns its taps. */}
+        {!hasContent ? (
           <GestureDetector gesture={revealGesture}>
             <Animated.View
+              pointerEvents={pulledOpen ? "none" : "auto"}
               style={{
                 position: "absolute",
                 top: 0,
@@ -1097,15 +1104,17 @@ export default function HomeScreen() {
                 justifyContent: "center",
               }}
             >
-              <View
-                style={{
-                  width: 36,
-                  height: 3,
-                  borderRadius: 2,
-                  backgroundColor: borderColor,
-                  opacity: 0.6,
-                }}
-              />
+              {!pulledOpen ? (
+                <View
+                  style={{
+                    width: 36,
+                    height: 3,
+                    borderRadius: 2,
+                    backgroundColor: borderColor,
+                    opacity: 0.6,
+                  }}
+                />
+              ) : null}
             </Animated.View>
           </GestureDetector>
         ) : null}
