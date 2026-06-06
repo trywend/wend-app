@@ -23,6 +23,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useAuthStore } from "@/store/authSlice";
 import { useDispatchStore } from "@/store/dispatchSlice";
+import { useNotesCache } from "@/store/notesCacheSlice";
 import {
   getNote,
   listNotes,
@@ -109,6 +110,11 @@ function computeItem(
 export function useNotesList(): UseNotesListResult {
   const userId = useAuthStore((s) => s.user?.id);
   const runningNoteId = useDispatchStore((s) => s.runningNoteId);
+  // Shared cache-version counter. Bumped by any mutation
+  // (createNote / archiveNote / deleteNote / etc.) — every
+  // useNotesList instance re-fetches when it changes. Closes the
+  // "delete didn't update inbox until close+reopen" bug.
+  const cacheVersion = useNotesCache((s) => s.version);
   const [notes, setNotes] = useState<NoteListItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
@@ -161,7 +167,10 @@ export function useNotesList(): UseNotesListResult {
   useEffect(() => {
     setIsLoading(true);
     void refresh();
-  }, [refresh]);
+    // cacheVersion is the trigger from mutations elsewhere — adding it
+    // to deps makes every instance of this hook re-fetch the moment
+    // ANY note mutates, not just the one whose owner called refresh().
+  }, [refresh, cacheVersion]);
 
   // Overlay the live "running" signal from the dispatchSlice. Storage only
   // ever holds completed runs, so without this overlay the pip never flips

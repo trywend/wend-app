@@ -47,6 +47,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Crypto from "expo-crypto";
 
 import type { Attachment } from "./attachments";
+import { bumpNotesVersion } from "@/store/notesCacheSlice";
 
 /* ===========================================================================
    TYPES — plain client shapes, no Drizzle/Neon imports.
@@ -279,21 +280,43 @@ export async function loadOrCreateDraftNote(
 
   if (mine.length > 0) {
     const existing = mine[0]!;
-    const block = await readBodyBlock(existing.id);
-    return {
-      note: existing,
-      bodyText: block?.content.text ?? "",
-      runs: block?.content.runs ?? [],
-    };
+    // Idle-threshold gate: if the most recent draft hasn't been touched
+    // for longer than IDLE_NEW_DRAFT_MS, drop it and open a fresh blank
+    // note instead. The user is starting a new thought, not resuming.
+    // Default: 15 minutes. Override via the SESSION_IDLE_MS env so the
+    // dev build can crank this lower for testing.
+    const idleMs = Date.now() - existing.updatedAt;
+    if (idleMs < IDLE_NEW_DRAFT_MS) {
+      const block = await readBodyBlock(existing.id);
+      return {
+        note: existing,
+        bodyText: block?.content.text ?? "",
+        runs: block?.content.runs ?? [],
+      };
+    }
+    // Stale draft → fall through to creating a fresh one. The old one
+    // stays in the inbox; we just don't auto-resume it on cold launch.
   }
 
-  // Nothing to load — create a fresh empty note + body block.
+  // Nothing to load (or stale) — create a fresh empty note + body block.
   const note = makeEmptyNote(userId);
   const block = makeEmptyBlock(note.id);
   await writeIndex([note, ...all]);
   await writeBodyBlock(block);
+  bumpNotesVersion();
   return { note, bodyText: "", runs: [] };
 }
+
+/** Default cold-launch idle threshold for auto-resuming the last draft.
+ *  After this much idle time, loadOrCreateDraftNote skips the last draft
+ *  and creates a fresh one. The old draft stays in the inbox. */
+const IDLE_NEW_DRAFT_MS = (() => {
+  // EXPO_PUBLIC_SESSION_IDLE_MS lets dev builds force a shorter idle for
+  // testing. Numeric env vars come through as strings in Expo.
+  const raw = process.env.EXPO_PUBLIC_SESSION_IDLE_MS;
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 15 * 60 * 1000;
+})();
 
 /**
  * Create a brand-new empty note for the user (always a new record).
@@ -307,6 +330,7 @@ export async function createNote(
   const all = await readIndex();
   await writeIndex([note, ...all]);
   await writeBodyBlock(block);
+  bumpNotesVersion();
   return { note, bodyText: "", runs: [] };
 }
 
@@ -366,6 +390,7 @@ export async function saveNote(args: {
     };
     await writeBodyBlock(block);
   }
+  bumpNotesVersion();
 }
 
 /**
@@ -412,6 +437,7 @@ export async function archiveNote(id: string): Promise<void> {
   const now = Date.now();
   all[idx] = { ...all[idx]!, archivedAt: now, updatedAt: now };
   await writeIndex(all);
+  bumpNotesVersion();
 }
 
 /**
@@ -425,4 +451,5 @@ export async function deleteNote(id: string): Promise<void> {
   const next = all.filter((n) => n.id !== id);
   await writeIndex(next);
   await removeBodyBlock(id);
+  bumpNotesVersion();
 }
