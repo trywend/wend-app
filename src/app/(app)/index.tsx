@@ -201,20 +201,24 @@ export default function HomeScreen() {
     isBodyEmpty && isTitleEmpty && !hasRuns && !inflight;
   const hasContent = !noUserInputYet;
 
-  // Pull-to-reveal for the top bar on the blank canvas. The bar normally
-  // only shows once the note has content, so a fresh note opens quiet.
-  // A downward pan past PULL_REVEAL_PX brings the bar in; we auto-hide it
-  // ~3s after the gesture ends so the canvas goes back to clean.
+  // Reveal-the-top-bar affordance for the blank canvas. The bar is hidden
+  // by default on S1 so a fresh note opens quiet; the user still needs a
+  // way to reach Inbox / Search / Settings without typing.
   //
-  // We use a real PanGesture (not ScrollView's onScroll) because the body
-  // TextInput autoFocuses and swallows pan gestures — onScroll never sees
-  // any negative offset while the keyboard is up. The pan gesture activates
-  // only after 20px of net downward motion, so single-point taps still
-  // route to the TextInput for cursor placement.
+  // Earlier attempts wrapped the ScrollView (or its onScroll) in a
+  // PanGesture. Both lost to the autoFocused multiline body TextInput,
+  // which claims touches at the native level on iOS — the parent
+  // GestureDetector never saw the movement, so `pulledOpen` never flipped.
+  //
+  // Fix: a thin overlay strip pinned to the top edge, ABOVE the
+  // ScrollView/TextInput in z-order, with its own GestureDetector. It owns
+  // a ~24px-tall band of screen that the TextInput cannot intercept.
+  // Either a tap or a small downward pan inside the strip reveals the bar.
+  // Auto-hide ~3s after the gesture so the canvas returns to clean.
   const [pulledOpen, setPulledOpen] = useState(false);
   const pullHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const PULL_REVEAL_PX = 28;
   const PULL_HIDE_DELAY_MS = 3000;
+  const REVEAL_STRIP_HEIGHT = 24;
 
   const showTopBar = hasContent || pulledOpen;
 
@@ -235,23 +239,26 @@ export default function HomeScreen() {
     if (pullHideTimer.current) clearTimeout(pullHideTimer.current);
   }, []);
 
-  const revealPanGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        // Only activate on a clear downward drag — keeps taps on the
-        // TextInput from triggering the bar.
-        .activeOffsetY([20, 9999])
-        .failOffsetY([-9999, -10])
-        .onUpdate((e) => {
-          if (e.translationY >= PULL_REVEAL_PX) {
-            runOnJS(revealTopBar)();
-          }
-        })
-        .onEnd(() => {
-          runOnJS(schedulePullHide)();
-        }),
-    [],
-  );
+  // Tap OR downward pan inside the top strip reveals the bar. We compose
+  // them with Race so either gesture independently wins — Pan needs ~8px
+  // of downward travel, Tap fires on quick contact.
+  const revealGesture = useMemo(() => {
+    const pan = Gesture.Pan()
+      .activeOffsetY([8, 9999])
+      .failOffsetY([-9999, -8])
+      .onStart(() => {
+        runOnJS(revealTopBar)();
+      })
+      .onEnd(() => {
+        runOnJS(schedulePullHide)();
+      });
+    const tap = Gesture.Tap()
+      .maxDuration(400)
+      .onEnd((_e, success) => {
+        if (success) runOnJS(revealTopBar)();
+      });
+    return Gesture.Race(pan, tap);
+  }, []);
 
   // What the next send would use as a prompt.
   const nextPromptSource = isFirstSend ? body : lastFollowUp;
@@ -822,13 +829,7 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
-        {/* ─── Editor body ────────────────────────────────────────────
-            Wrapped in GestureDetector so a downward pan reveals the top
-            bar on the blank canvas (S1) — the focused body TextInput
-            would otherwise swallow the gesture and the bar would never
-            appear. activeOffsetY=[20, 9999] keeps small taps routing to
-            the TextInput for cursor placement. */}
-        <GestureDetector gesture={revealPanGesture}>
+        {/* ─── Editor body ────────────────────────────────────────────── */}
         <ScrollView
           ref={scrollRef}
           style={{ flex: 1 }}
@@ -993,7 +994,40 @@ export default function HomeScreen() {
             />
           ) : null}
         </ScrollView>
-        </GestureDetector>
+
+        {/* ─── Top-edge reveal strip (S1 only) ─────────────────────────
+            A 24px-tall transparent band at the very top of the screen.
+            It sits ABOVE the ScrollView/TextInput in z-order so its
+            GestureDetector receives touches the focused body input
+            would otherwise eat. Tap reveals; downward pan reveals. We
+            only mount this when the bar isn't already shown — once it's
+            up, the bar itself is the affordance. */}
+        {!showTopBar ? (
+          <GestureDetector gesture={revealGesture}>
+            <Animated.View
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                height: REVEAL_STRIP_HEIGHT,
+                zIndex: 50,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <View
+                style={{
+                  width: 36,
+                  height: 3,
+                  borderRadius: 2,
+                  backgroundColor: borderColor,
+                  opacity: 0.6,
+                }}
+              />
+            </Animated.View>
+          </GestureDetector>
+        ) : null}
 
         {/* ─── Confidence chip (S13) ──────────────────────────────────── */}
         {showChip ? (
