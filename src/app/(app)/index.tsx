@@ -49,8 +49,6 @@ import Animated, {
   SlideOutDown,
 } from "react-native-reanimated";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import { runOnJS } from "react-native-reanimated";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ArrowUpIcon,
@@ -223,60 +221,24 @@ export default function HomeScreen() {
   // by default on S1 so a fresh note opens quiet; the user still needs a
   // way to reach Inbox / Search / Settings without typing.
   //
-  // Earlier attempts wrapped the ScrollView (or its onScroll) in a
-  // PanGesture. Both lost to the autoFocused multiline body TextInput,
-  // which claims touches at the native level on iOS — the parent
-  // GestureDetector never saw the movement, so `pulledOpen` never flipped.
+  // History: pull-down gestures (ScrollView.onScroll, then a wrapping
+  // PanGesture, then a 24px GestureDetector strip with a Pan/Tap race) all
+  // failed in user testing — the autoFocused body TextInput won touch
+  // routing, and the 3s auto-hide killed the bar before the user could
+  // tap it.
   //
-  // Fix: a thin overlay strip pinned to the top edge, ABOVE the
-  // ScrollView/TextInput in z-order, with its own GestureDetector. It owns
-  // a ~24px-tall band of screen that the TextInput cannot intercept.
-  // Either a tap or a small downward pan inside the strip reveals the bar.
-  // Auto-hide ~3s after the gesture so the canvas returns to clean.
+  // Now: a 56px-tall `Pressable` overlay strip pinned to the top edge.
+  // Tap reveals the bar; the bar then stays open for the rest of the
+  // session. No gesture races, no timers — too much complexity for an
+  // alpha-quality affordance. A subtle handle hints at the target.
   const [pulledOpen, setPulledOpen] = useState(false);
-  const pullHideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const PULL_HIDE_DELAY_MS = 3000;
-  const REVEAL_STRIP_HEIGHT = 24;
+  const REVEAL_STRIP_HEIGHT = 56;
 
   const showTopBar = hasContent || pulledOpen;
 
-  function schedulePullHide() {
-    if (pullHideTimer.current) clearTimeout(pullHideTimer.current);
-    pullHideTimer.current = setTimeout(() => {
-      setPulledOpen(false);
-      pullHideTimer.current = null;
-    }, PULL_HIDE_DELAY_MS);
-  }
-
   function revealTopBar() {
     setPulledOpen(true);
-    schedulePullHide();
   }
-
-  useEffect(() => () => {
-    if (pullHideTimer.current) clearTimeout(pullHideTimer.current);
-  }, []);
-
-  // Tap OR downward pan inside the top strip reveals the bar. We compose
-  // them with Race so either gesture independently wins — Pan needs ~8px
-  // of downward travel, Tap fires on quick contact.
-  const revealGesture = useMemo(() => {
-    const pan = Gesture.Pan()
-      .activeOffsetY([8, 9999])
-      .failOffsetY([-9999, -8])
-      .onStart(() => {
-        runOnJS(revealTopBar)();
-      })
-      .onEnd(() => {
-        runOnJS(schedulePullHide)();
-      });
-    const tap = Gesture.Tap()
-      .maxDuration(400)
-      .onEnd((_e, success) => {
-        if (success) runOnJS(revealTopBar)();
-      });
-    return Gesture.Race(pan, tap);
-  }, []);
 
   // What the next send would use as a prompt.
   const nextPromptSource = isFirstSend ? body : lastFollowUp;
@@ -1056,37 +1018,36 @@ export default function HomeScreen() {
         </ScrollView>
 
         {/* ─── Top-edge reveal strip (S1 only) ─────────────────────────
-            A 24px-tall transparent band at the very top of the screen.
-            It sits ABOVE the ScrollView/TextInput in z-order so its
-            GestureDetector receives touches the focused body input
-            would otherwise eat. Tap reveals; downward pan reveals. We
-            only mount this when the bar isn't already shown — once it's
-            up, the bar itself is the affordance. */}
+            56px Pressable pinned to the top edge, ABOVE the
+            ScrollView/TextInput in z-order so the focused body input
+            can't intercept the tap. Visible handle marks the target. */}
         {!showTopBar ? (
-          <GestureDetector gesture={revealGesture}>
-            <Animated.View
+          <Pressable
+            onPress={revealTopBar}
+            accessibilityRole="button"
+            accessibilityLabel="Show top bar"
+            style={({ pressed }) => ({
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              height: REVEAL_STRIP_HEIGHT,
+              zIndex: 50,
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: pressed ? 0.6 : 1,
+            })}
+          >
+            <View
               style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                height: REVEAL_STRIP_HEIGHT,
-                zIndex: 50,
-                alignItems: "center",
-                justifyContent: "center",
+                width: 40,
+                height: 4,
+                borderRadius: 2,
+                backgroundColor: borderColor,
+                opacity: 0.55,
               }}
-            >
-              <View
-                style={{
-                  width: 36,
-                  height: 3,
-                  borderRadius: 2,
-                  backgroundColor: borderColor,
-                  opacity: 0.6,
-                }}
-              />
-            </Animated.View>
-          </GestureDetector>
+            />
+          </Pressable>
         ) : null}
 
         {/* ─── Confidence chip (S13) ──────────────────────────────────── */}
