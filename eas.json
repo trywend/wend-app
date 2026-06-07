@@ -7,6 +7,9 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_Z3Jvd24tbW90aC00NC5jbGVyay5hY2NvdW50cy5kZXYk"
+      },
       "android": {
         "buildType": "apk",
         "gradleCommand": ":app:assembleDebug"
@@ -25,6 +28,9 @@
     "preview": {
       "distribution": "internal",
       "channel": "preview",
+      "env": {
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_Z3Jvd24tbW90aC00NC5jbGVyay5hY2NvdW50cy5kZXYk"
+      },
       "android": {
         "buildType": "apk"
       },
@@ -41,6 +47,9 @@
     },
     "production": {
       "channel": "production",
+      "env": {
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_Z3Jvd24tbW90aC00NC5jbGVyay5hY2NvdW50cy5kZXYk"
+      },
       "android": {
         "buildType": "app-bundle"
       },
