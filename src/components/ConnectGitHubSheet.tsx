@@ -43,6 +43,7 @@ import { useAuth } from "@clerk/clerk-expo";
 
 import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
+import { useAndroidBack } from "@/lib/useAndroidBack";
 
 export interface ConnectGitHubSheetProps {
   open: boolean;
@@ -89,6 +90,8 @@ function ConnectGitHubSheetMounted({
 }: ConnectGitHubSheetProps) {
   const { tokens } = useTheme();
   const { getToken } = useAuth();
+  // Android back closes the topmost (this) sheet first.
+  useAndroidBack(true, onClose);
 
   // -- Status state machine. `null` while we haven't loaded yet. --
   const [status, setStatus] = useState<ProviderStatus | null>(null);

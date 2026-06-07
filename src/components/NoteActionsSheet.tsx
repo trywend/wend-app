@@ -38,6 +38,7 @@ import {
 
 import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
+import { useAndroidBack } from "@/lib/useAndroidBack";
 
 export interface NoteActionsSheetProps {
   open: boolean;
@@ -64,6 +65,11 @@ function NoteActionsSheetMounted({
 }: NoteActionsSheetProps) {
   const { tokens } = useTheme();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  // Android back: if mid-confirmation, step back to the action list; else close.
+  useAndroidBack(true, () => {
+    if (confirmingDelete) setConfirmingDelete(false);
+    else onClose();
+  });
 
   const canvasBg = tokens["surface-canvas"];
   const inkColor = tokens["text-primary"];

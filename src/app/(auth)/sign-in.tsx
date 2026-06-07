@@ -181,7 +181,9 @@ export default function SignInScreen() {
           ],
         }}
       />
-      <SafeAreaView style={{ flex: 1 }}>
+      {/* Explicit top + bottom edges so the form clears the Android
+          edge-to-edge status bar and the home indicator on iOS. */}
+      <SafeAreaView style={{ flex: 1 }} edges={["top", "bottom"]}>
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
         style={{ flex: 1 }}

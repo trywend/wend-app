@@ -27,7 +27,12 @@ export default function AppLayout() {
   const pairSkipped = useOnboardingStore((s) => s.pairSkipped);
 
   const paired = Boolean(deviceId && token);
-  const onOnboarding = segments[1] === "onboarding";
+  // expo-router types `useSegments()` as a string tuple, so a numeric index
+  // beyond the known length tripped TS2493. Cast to a loose string[] read —
+  // semantically equivalent and matches what the runtime hands us. Pre-
+  // existing issue surfaced when the Android polish work ran a clean
+  // `tsc --noEmit`; fix is in-place to keep the typecheck green.
+  const onOnboarding = (segments as readonly string[])[1] === "onboarding";
 
   useEffect(() => {
     // Send unpaired, never-skipped users to onboarding.

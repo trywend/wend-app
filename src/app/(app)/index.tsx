@@ -1284,6 +1284,7 @@ export default function HomeScreen() {
               }}
               accessibilityRole="button"
               accessibilityLabel="Attach file"
+              android_ripple={ANDROID_ICON_RIPPLE}
               style={({ pressed }) => ({
                 width: 40,
                 height: 40,
@@ -1309,6 +1310,14 @@ export default function HomeScreen() {
               accessibilityRole="button"
               accessibilityState={{ disabled: !isStreaming && !canSend }}
               accessibilityLabel={isStreaming ? "Stop dispatch" : "Send note"}
+              android_ripple={Platform.select({
+                android: {
+                  color: "rgba(255,255,255,0.20)",
+                  borderless: false,
+                  foreground: true,
+                } as const,
+                default: undefined,
+              })}
               style={({ pressed }) => ({
                 width: 40,
                 height: 40,
@@ -1379,6 +1388,14 @@ export default function HomeScreen() {
                   void handleSend();
                 }}
                 disabled={!canSend}
+                android_ripple={Platform.select({
+                  android: {
+                    color: "rgba(255,255,255,0.22)",
+                    borderless: false,
+                    foreground: true,
+                  } as const,
+                  default: undefined,
+                })}
                 style={({ pressed }) => ({
                   width: 56,
                   height: 56,
@@ -1516,6 +1533,17 @@ export default function HomeScreen() {
 
 /* ─── Sub-components ──────────────────────────────────────────────────── */
 
+/** Material-style ripple for icon-shaped buttons (top bar, toolbar).
+ *  borderless: true makes it a circular ripple that spills past the icon
+ *  bounds slightly — the standard Android icon-button look. We tint with
+ *  the accent at low opacity so the ripple reads as "branded" without
+ *  overwhelming the iOS scale/opacity feedback (which still runs alongside
+ *  on Android, harmlessly). `undefined` on iOS leaves behavior unchanged. */
+const ANDROID_ICON_RIPPLE = Platform.select({
+  android: { color: "rgba(216,90,60,0.20)", borderless: true } as const,
+  default: undefined,
+});
+
 function IconButton(props: {
   icon: React.ReactNode;
   onPress: () => void;
@@ -1526,6 +1554,7 @@ function IconButton(props: {
       onPress={props.onPress}
       accessibilityRole="button"
       accessibilityLabel={props.accessibilityLabel}
+      android_ripple={ANDROID_ICON_RIPPLE}
       style={({ pressed }) => ({
         width: 36,
         height: 36,
@@ -1555,6 +1584,7 @@ function MarkdownButton(props: {
       accessibilityRole="button"
       accessibilityLabel={props.accessibilityLabel}
       hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}
+      android_ripple={ANDROID_ICON_RIPPLE}
       style={({ pressed }) => ({
         width: 40,
         height: 40,
@@ -1659,6 +1689,14 @@ function FollowUpInput(props: {
             props.isStreaming ? "Stop dispatch" : "Send follow-up"
           }
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          android_ripple={Platform.select({
+            android: {
+              color: "rgba(255,255,255,0.20)",
+              borderless: false,
+              foreground: true,
+            } as const,
+            default: undefined,
+          })}
           style={({ pressed }) => ({
             width: 40,
             height: 40,

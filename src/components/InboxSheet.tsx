@@ -61,6 +61,7 @@ import {
 import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
 import { useNotesList, type NoteListItem } from "@/lib/notes/useNotesList";
+import { useAndroidBack } from "@/lib/useAndroidBack";
 
 const SPRING = { stiffness: 280, damping: 30, mass: 0.9 } as const;
 
@@ -102,6 +103,9 @@ function InboxSheetMounted({
   onOpenSettings,
   onLongPressNote,
 }: InboxSheetProps) {
+  // Android hardware back closes the sheet (instead of exiting the app).
+  // See src/lib/useAndroidBack.ts for the LIFO ordering rationale.
+  useAndroidBack(true, onClose);
   const { tokens } = useTheme();
   const { notes, isLoading } = useNotesList();
   const [filter, setFilter] = useState<Filter>("all");
@@ -498,6 +502,7 @@ function FilterChip(props: FilterChipProps) {
       onPress={onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
+      android_ripple={{ color: `${activeColor}25`, borderless: false }}
       style={({ pressed }) => ({
         paddingHorizontal: 16,
         paddingVertical: 6,
@@ -506,6 +511,7 @@ function FilterChip(props: FilterChipProps) {
         borderColor: active ? activeBorder : inactiveBorder,
         backgroundColor: active ? activeBg : "transparent",
         opacity: pressed ? 0.7 : 1,
+        overflow: "hidden",
       })}
     >
       <Text
@@ -570,6 +576,7 @@ function NoteCard({
       onPress={onPress}
       onLongPress={onLongPress}
       accessibilityRole="button"
+      android_ripple={{ color: "rgba(0,0,0,0.06)", borderless: false }}
       style={({ pressed }) => ({
         backgroundColor: tokens.cardBg,
         borderRadius: 14,
@@ -586,6 +593,7 @@ function NoteCard({
         shadowOpacity: 0.05,
         shadowRadius: 4,
         elevation: 1,
+        overflow: "hidden",
       })}
     >
       <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>

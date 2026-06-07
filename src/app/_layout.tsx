@@ -13,6 +13,7 @@
  * they're ready so the first paint has correct type.
  */
 import { useEffect } from "react";
+import { Platform } from "react-native";
 import { Slot, useRouter, useSegments } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
@@ -39,6 +40,56 @@ if (!isClerkConfigured) {
 }
 
 void SplashScreen.preventAutoHideAsync();
+
+/**
+ * Android: set up notification channels at app boot.
+ *
+ * Android 8+ (API 26+) refuses to display a notification that doesn't belong
+ * to a channel. SDK 56's `expo-notifications` exposes
+ * `setNotificationChannelAsync` which idempotently creates (or updates) one.
+ * We create two:
+ *   - "default"  — generic system pings (welcome, sign-in completed, etc.)
+ *   - "dispatch" — the actual Claude-run completion notifications (HIGH so
+ *                  they heads-up on the lockscreen + with a short vibrate
+ *                  pattern so they feel distinct from background noise).
+ *
+ * Lazy-loaded via require so a build without expo-notifications still boots —
+ * see src/lib/notifications.ts for the same defensive pattern. iOS has no
+ * channel concept; this is a no-op there.
+ */
+function setupAndroidNotificationChannels(): void {
+  if (Platform.OS !== "android") return;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const N = require("expo-notifications") as {
+      setNotificationChannelAsync?: (
+        id: string,
+        channel: Record<string, unknown>,
+      ) => Promise<void>;
+      AndroidImportance?: { DEFAULT: number; HIGH: number; MAX: number };
+    };
+    if (!N.setNotificationChannelAsync) return;
+    const HIGH = N.AndroidImportance?.HIGH ?? 4;
+    void N.setNotificationChannelAsync("default", {
+      name: "Default",
+      importance: HIGH,
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: "#D85A3C",
+    });
+    void N.setNotificationChannelAsync("dispatch", {
+      name: "Dispatch complete",
+      description: "Claude-run completion pings from your Mac.",
+      importance: HIGH,
+      vibrationPattern: [0, 200, 100, 200],
+      lightColor: "#D85A3C",
+    });
+  } catch {
+    // expo-notifications not installed yet — silent skip. The lazy-load
+    // in src/lib/notifications.ts handles a graceful fallback.
+  }
+}
+
+setupAndroidNotificationChannels();
 
 /** Redirects between the (auth) and (app) route groups based on session. */
 function AuthGate() {
@@ -78,6 +129,16 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <QueryProvider>
           <ThemeProvider>
+            {/* StatusBar:
+             *   - iOS: `style="auto"` lets the OS choose dark/light based on
+             *     userInterfaceStyle.
+             *   - Android: SDK 56 `expo-status-bar` dropped the
+             *     `translucent` / `backgroundColor` props — Android is
+             *     ALWAYS edge-to-edge in SDK 53+ and the system bar is
+             *     transparent by default. Layouts handle the top inset via
+             *     react-native-safe-area-context's `useSafeAreaInsets`
+             *     (the editor screen already does).
+             */}
             <StatusBar style="auto" />
             <AuthGate />
           </ThemeProvider>

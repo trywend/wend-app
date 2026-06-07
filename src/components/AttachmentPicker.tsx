@@ -18,7 +18,13 @@
  */
 
 import { useState } from "react";
-import { ActivityIndicator, Alert, Pressable, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Linking,
+  Pressable,
+  View,
+} from "react-native";
 import Animated, {
   FadeIn,
   FadeOut,
@@ -33,6 +39,7 @@ import {
   copyAttachmentIntoNote,
   type Attachment,
 } from "@/lib/attachments";
+import { useAndroidBack } from "@/lib/useAndroidBack";
 
 // expo-image-picker and expo-document-picker are loaded at runtime via
 // require so a dev client that was built before they were added doesn't
@@ -88,6 +95,10 @@ function Mounted({
 }: AttachmentPickerProps) {
   const { tokens } = useTheme();
   const [busy, setBusy] = useState(false);
+  // Android back closes the picker rather than exiting the app.
+  useAndroidBack(true, () => {
+    if (!busy) onClose();
+  });
 
   const surface = tokens["surface-elevated"];
   const border = tokens["border-hairline"];
@@ -110,12 +121,29 @@ function Mounted({
     try {
       // Permission first — iOS requires it for the limited-library API even
       // though the modern picker is technically permissionless. Cheap
-      // belt-and-braces.
+      // belt-and-braces. On Android 13+ the OS only prompts for
+      // READ_MEDIA_IMAGES once; "don't ask again" returns `canAskAgain:false`,
+      // in which case the only path forward is the app's system Settings
+      // screen — we surface that with a deeplink button.
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (perm.status !== "granted") {
+        const canAsk = perm.canAskAgain !== false;
         Alert.alert(
           "Photos access needed",
-          "Wend needs access to your photo library to attach images. You can enable it in Settings.",
+          canAsk
+            ? "Wend needs access to your photo library to attach images. You can enable it in Settings."
+            : "Photos access was previously denied. Tap Open Settings to enable it for Wend.",
+          canAsk
+            ? [{ text: "OK", style: "default" }]
+            : [
+                { text: "Not now", style: "cancel" },
+                {
+                  text: "Open Settings",
+                  onPress: () => {
+                    void Linking.openSettings();
+                  },
+                },
+              ],
         );
         return;
       }
@@ -329,6 +357,7 @@ function PickerRow(props: PickerRowProps) {
       accessibilityRole="button"
       accessibilityLabel={props.label}
       accessibilityState={{ disabled: props.disabled }}
+      android_ripple={{ color: "rgba(0,0,0,0.07)", borderless: false }}
       style={({ pressed }) => ({
         flexDirection: "row",
         alignItems: "center",
@@ -341,6 +370,7 @@ function PickerRow(props: PickerRowProps) {
         backgroundColor: pressed ? props.chipBg : "transparent",
         opacity: props.disabled ? 0.5 : 1,
         marginBottom: 10,
+        overflow: "hidden",
       })}
     >
       <View
