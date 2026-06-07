@@ -78,6 +78,16 @@ import {
   parsePairingString,
   useDaemonStore,
 } from "@/store/daemonSlice";
+import {
+  defaultPhoneName,
+  discoverDaemon,
+  generateNonce,
+  isBonjourAvailable,
+  pollLanPair,
+  startLanPair,
+  type DiscoveredDaemon,
+  type LanPairReady,
+} from "@/lib/bonjour";
 
 /** Rendezvous backend base URL — same constant the resolver hook uses.
  *  Kept inline (instead of imported) because the resolver file already
@@ -211,7 +221,15 @@ interface ConnectMacSheetProps {
   onClose: () => void;
 }
 
-type Mode = "scanning" | "code" | "success" | "error" | "manual";
+type Mode =
+  | "discovering"   // Bonjour scan in progress on sheet mount
+  | "discovered"    // Found a Mac on the same WiFi; awaiting tap-to-connect
+  | "approving"     // POSTed /v1/lan-pair, polling for Mac-side approval
+  | "scanning"      // QR scanner active
+  | "code"          // OTP entry
+  | "success"
+  | "error"
+  | "manual";
 
 export function ConnectMacSheet(
   props: ConnectMacSheetProps,
@@ -227,10 +245,24 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
   // sees a "rebuild" notice and the OTP path remains usable.
   const cameraHook = useCameraPermissions ?? (() => [null, async () => ({ granted: false, canAskAgain: false })] as const);
   const [permission, requestPermission] = cameraHook();
-  const [mode, setMode] = useState<Mode>(cameraAvailable ? "scanning" : "code");
+  // Boot into Bonjour discovery when the native module is linked. If
+  // not, skip straight to the QR scanner (or OTP if no camera either).
+  // Falls through to QR after a short timeout if nothing surfaces — the
+  // local-network path is a nicety, not the canonical flow.
+  const bonjourAvailable = isBonjourAvailable();
+  const [mode, setMode] = useState<Mode>(
+    bonjourAvailable
+      ? "discovering"
+      : cameraAvailable
+        ? "scanning"
+        : "code",
+  );
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [pairedHost, setPairedHost] = useState<string | null>(null);
   const [manualText, setManualText] = useState<string>("");
+  /** The Mac surfaced by Bonjour. Carried into the "discovered" and
+   *  "approving" views so we can re-poll on retry without re-scanning. */
+  const [discovered, setDiscovered] = useState<DiscoveredDaemon | null>(null);
   /** Lock so a sequence of QR detections in the same camera frame doesn't
    *  fire the handler twice and double-write the store. Released on
    *  error or re-mount. */
@@ -250,16 +282,49 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
     }
   }, [permission, requestPermission]);
 
-  // Reset to scanning whenever the sheet re-opens.
+  // Reset to the initial mode whenever the sheet re-opens. The initial
+  // mode is `discovering` when Bonjour is linked (typical iOS dev
+  // client) so we get the zero-config path; falls back to QR otherwise.
   useEffect(() => {
     if (open) {
-      setMode("scanning");
+      setMode(
+        bonjourAvailable
+          ? "discovering"
+          : cameraAvailable
+            ? "scanning"
+            : "code",
+      );
       setErrorMsg(null);
       setPairedHost(null);
       setManualText("");
+      setDiscovered(null);
       lockRef.current = false;
     }
-  }, [open]);
+  }, [open, bonjourAvailable]);
+
+  // Bonjour scan — runs on every transition into "discovering". The
+  // hook in bonjour.ts owns the timeout and listener cleanup. If a
+  // Mac surfaces, we shift to "discovered" (one-tap connect). If not,
+  // we silently fall through to the QR scanner — the user can still
+  // pair with the canonical flow.
+  useEffect(() => {
+    if (mode !== "discovering") return;
+    let cancelled = false;
+    void (async () => {
+      const found = await discoverDaemon();
+      if (cancelled) return;
+      if (found) {
+        setDiscovered(found);
+        setMode("discovered");
+      } else {
+        // Silent fall-through to the camera (or OTP) path.
+        setMode(cameraAvailable ? "scanning" : "code");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, cameraAvailable]);
 
   function handleScan(result: BarcodeScanningResult) {
     if (lockRef.current) return;
@@ -318,6 +383,83 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
 
   function trySubmitManual() {
     finalize(manualText.trim());
+  }
+
+  /** Bonjour → Mac approval handshake. Fired from the "discovered"
+   *  view's "Connect" button. POSTs /v1/lan-pair, then polls the same
+   *  endpoint until the user approves on the Mac. On approval, we hand
+   *  the resulting URL + token to the daemon slice exactly as a QR scan
+   *  would have, plus the adopt-device round-trip when a deviceId is
+   *  present. */
+  async function approveLanPair(daemon: DiscoveredDaemon) {
+    setMode("approving");
+    setErrorMsg(null);
+
+    const startRes = await startLanPair(daemon, {
+      nonce: generateNonce(),
+      phoneName: defaultPhoneName(),
+    });
+    if (startRes.status === "error") {
+      setErrorMsg(startRes.reason);
+      setMode("error");
+      return;
+    }
+
+    const poll = await pollLanPair(daemon, startRes.id);
+    if (poll.status !== "ready") {
+      // Narrow the union for TS: "ready" is excluded above; "pending"
+      // shouldn't escape pollLanPair (it polls internally), but guard
+      // anyway so the message defaults to something useful.
+      const reason =
+        poll.status === "rejected"
+          ? "Mac rejected the pairing request."
+          : poll.status === "error"
+            ? poll.reason
+            : "Mac is still waiting — try again.";
+      setErrorMsg(reason);
+      setMode("error");
+      return;
+    }
+
+    // Reuse the same code path as a QR pairing so daemon + rendezvous
+    // adoption stay identical between the two routes. v2 if deviceId
+    // was sent; v1 fallback otherwise.
+    const ready = poll as LanPairReady;
+    const payload =
+      ready.deviceId !== undefined
+        ? {
+            v: 2 as const,
+            deviceId: ready.deviceId,
+            token: ready.token,
+            host: ready.host,
+            url: ready.url,
+            issued: Date.now(),
+          }
+        : {
+            v: 1 as const,
+            url: ready.url,
+            token: ready.token,
+            host: ready.host,
+            issued: Date.now(),
+          };
+    useDaemonStore.getState().setPaired(payload);
+    setPairedHost(ready.host);
+
+    if (payload.v === 2 && isSignedIn) {
+      const adoptError = await adoptDevice(
+        payload.deviceId,
+        payload.token,
+        getToken,
+      );
+      if (adoptError) {
+        setErrorMsg(adoptError);
+        setMode("error");
+        return;
+      }
+    }
+
+    setMode("success");
+    setTimeout(onClose, 1400);
   }
 
   const ink = tokens["text-primary"];
@@ -450,7 +592,32 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
 
         {/* Body switches on mode */}
         <View style={{ flex: 1, paddingHorizontal: 20, paddingBottom: 24 }}>
-          {!cameraAvailable && mode === "scanning" ? (
+          {mode === "discovering" ? (
+            <DiscoveringView
+              onSkip={() => setMode(cameraAvailable ? "scanning" : "code")}
+              ink={ink}
+              subtle={subtle}
+              accent={accent}
+            />
+          ) : mode === "discovered" && discovered !== null ? (
+            <DiscoveredView
+              daemon={discovered}
+              onConnect={() => void approveLanPair(discovered)}
+              onSkip={() => setMode(cameraAvailable ? "scanning" : "code")}
+              ink={ink}
+              subtle={subtle}
+              border={border}
+              accent={accent}
+              accentOn={accentOn}
+            />
+          ) : mode === "approving" ? (
+            <ApprovingView
+              host={discovered?.txt.host ?? discovered?.name ?? "your Mac"}
+              ink={ink}
+              subtle={subtle}
+              accent={accent}
+            />
+          ) : !cameraAvailable && mode === "scanning" ? (
             <CameraUnavailableView
               detail={cameraLoadError ?? "Camera module not linked."}
               onUseCode={() => setMode("code")}
@@ -1312,5 +1479,217 @@ function PillButton({
         </Text>
       </View>
     </Pressable>
+  );
+}
+
+/* ─── Bonjour discovery views ───────────────────────────────────────── */
+
+/** Shown for the first ~3.5s while we scan `_wend._tcp.local`. Falls
+ *  through silently to the QR scanner if nothing surfaces — the user
+ *  never sees an explicit "no Mac found" error; that would feel like
+ *  the canonical (QR) flow is the fallback when it's actually the
+ *  reverse. */
+function DiscoveringView(props: {
+  onSkip: () => void;
+  ink: string;
+  subtle: string;
+  accent: string;
+}) {
+  return (
+    <Centered>
+      <View
+        style={{
+          width: 76,
+          height: 76,
+          borderRadius: 38,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: `${props.accent}1F`,
+          marginBottom: 18,
+        }}
+      >
+        <LaptopIcon size={36} color={props.accent} weight="regular" />
+      </View>
+      <Text
+        style={{
+          fontFamily: "Inter-SemiBold",
+          fontSize: 18,
+          color: props.ink,
+          textAlign: "center",
+          marginBottom: 6,
+        }}
+      >
+        Looking for your Mac…
+      </Text>
+      <Text
+        style={{
+          fontFamily: "Inter-Regular",
+          fontSize: 13,
+          color: props.subtle,
+          textAlign: "center",
+          marginBottom: 22,
+          paddingHorizontal: 24,
+          lineHeight: 18,
+        }}
+      >
+        Same WiFi as your Mac? Wend will find it without a QR code.
+      </Text>
+      <Pressable
+        onPress={props.onSkip}
+        accessibilityRole="button"
+        accessibilityLabel="Use the QR code instead"
+        style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+      >
+        <Text
+          style={{
+            fontFamily: "Inter-Medium",
+            fontSize: 13,
+            color: props.subtle,
+            textDecorationLine: "underline",
+          }}
+        >
+          Use the QR code instead
+        </Text>
+      </Pressable>
+    </Centered>
+  );
+}
+
+/** A Mac was found on the same WiFi. Show its hostname + a single
+ *  "Connect" button. The connect path POSTs `/v1/lan-pair` and waits
+ *  for the Mac-side approval (NSAlert / menu-bar popover). */
+function DiscoveredView(props: {
+  daemon: DiscoveredDaemon;
+  onConnect: () => void;
+  onSkip: () => void;
+  ink: string;
+  subtle: string;
+  border: string;
+  accent: string;
+  accentOn: string;
+}) {
+  // Prefer the TXT-record `host` (scutil ComputerName) over the
+  // mDNS `name` — the latter often has trailing `(2)` collision
+  // suffixes that look ugly to a human.
+  const friendly =
+    props.daemon.txt.host && props.daemon.txt.host.length > 0
+      ? props.daemon.txt.host
+      : props.daemon.name;
+  return (
+    <Centered>
+      <View
+        style={{
+          width: 76,
+          height: 76,
+          borderRadius: 38,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: `${props.accent}22`,
+          marginBottom: 18,
+        }}
+      >
+        <LaptopIcon size={36} color={props.accent} weight="fill" />
+      </View>
+      <Text
+        style={{
+          fontFamily: "Inter-SemiBold",
+          fontSize: 18,
+          color: props.ink,
+          textAlign: "center",
+          marginBottom: 6,
+        }}
+      >
+        Found {friendly}
+      </Text>
+      <Text
+        style={{
+          fontFamily: "Inter-Regular",
+          fontSize: 13,
+          color: props.subtle,
+          textAlign: "center",
+          marginBottom: 22,
+          paddingHorizontal: 24,
+          lineHeight: 18,
+        }}
+      >
+        Tap Connect, then approve the request on your Mac.
+      </Text>
+      <PillButton
+        label="Connect"
+        onPress={props.onConnect}
+        bg={props.accent}
+        fg={props.accentOn}
+      />
+      <Pressable
+        onPress={props.onSkip}
+        accessibilityRole="button"
+        accessibilityLabel="Use the QR code instead"
+        style={({ pressed }) => ({ marginTop: 14, opacity: pressed ? 0.6 : 1 })}
+      >
+        <Text
+          style={{
+            fontFamily: "Inter-Medium",
+            fontSize: 13,
+            color: props.subtle,
+            textDecorationLine: "underline",
+          }}
+        >
+          Use the QR code instead
+        </Text>
+      </Pressable>
+    </Centered>
+  );
+}
+
+/** Polling state — request is in flight on the Mac side. The user is
+ *  expected to glance at their Mac and click Approve. We don't expose
+ *  a manual cancel here yet; the QR pill below the message lets them
+ *  abandon the LAN path if the Mac alert never shows. */
+function ApprovingView(props: {
+  host: string;
+  ink: string;
+  subtle: string;
+  accent: string;
+}) {
+  return (
+    <Centered>
+      <View
+        style={{
+          width: 76,
+          height: 76,
+          borderRadius: 38,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: `${props.accent}22`,
+          marginBottom: 18,
+        }}
+      >
+        <LaptopIcon size={36} color={props.accent} weight="regular" />
+      </View>
+      <Text
+        style={{
+          fontFamily: "Inter-SemiBold",
+          fontSize: 18,
+          color: props.ink,
+          textAlign: "center",
+          marginBottom: 6,
+        }}
+      >
+        Waiting for {props.host}
+      </Text>
+      <Text
+        style={{
+          fontFamily: "Inter-Regular",
+          fontSize: 13,
+          color: props.subtle,
+          textAlign: "center",
+          marginBottom: 4,
+          paddingHorizontal: 24,
+          lineHeight: 18,
+        }}
+      >
+        Approve the pairing request on your Mac to finish.
+      </Text>
+    </Centered>
   );
 }

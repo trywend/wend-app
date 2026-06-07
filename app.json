@@ -7,6 +7,15 @@
     "icon": "./assets/images/icon.png",
     "scheme": "wend",
     "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "Wend uses your local network to find your Mac without scanning a QR.",
+        "NSBonjourServices": [
+          "_wend._tcp"
+        ]
+      }
+    },
     "android": {
       "package": "app.trywend.wend",
       "versionCode": 1,
