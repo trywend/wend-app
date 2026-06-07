@@ -102,62 +102,96 @@ export async function discoverDaemon(
   timeoutMs: number = DISCOVERY_TIMEOUT_MS,
 ): Promise<DiscoveredDaemon | null> {
   if (!ZeroconfModule) {
-    // Without the native module we can't scan. Resolve null after a
-    // tick so the caller's "scanning…" state has a moment to render.
+    // eslint-disable-next-line no-console
+    console.warn("[bonjour] native module not linked:", zeroconfLoadError);
     await new Promise((r) => setTimeout(r, 50));
     return null;
   }
-  // Construct fresh per-call so a previous scan's listeners don't
-  // leak into this one (the lib reuses the same instance otherwise).
   const zc = new ZeroconfModule();
+  // eslint-disable-next-line no-console
+  console.log("[bonjour] discovery starting", {
+    type: WEND_SERVICE_TYPE,
+    protocol: WEND_SERVICE_PROTOCOL,
+    domain: WEND_SERVICE_DOMAIN,
+    timeoutMs,
+  });
 
   return new Promise<DiscoveredDaemon | null>((resolve) => {
     let settled = false;
-    const finish = (value: DiscoveredDaemon | null) => {
+    const finish = (value: DiscoveredDaemon | null, reason: string) => {
       if (settled) return;
       settled = true;
+      // eslint-disable-next-line no-console
+      console.log("[bonjour] discovery finished", {
+        found: Boolean(value),
+        reason,
+      });
       try {
         zc.stop();
         zc.removeDeviceListeners();
       } catch {
-        // best-effort cleanup; listeners are torn down with the instance
+        // best-effort cleanup
       }
       resolve(value);
     };
 
-    const timer = setTimeout(() => finish(null), timeoutMs);
+    const timer = setTimeout(() => finish(null, "timeout"), timeoutMs);
 
-    // The 'resolved' event fires once a service has both its address
-    // AND TXT records resolved — that's what we need to attempt a
-    // lan-pair POST. 'found' is too early (address may still be nil).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    zc.on("start", () => console.log("[bonjour] event:start"));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    zc.on("stop", () => console.log("[bonjour] event:stop"));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    zc.on("found", (name: any) =>
+      // eslint-disable-next-line no-console
+      console.log("[bonjour] event:found", name),
+    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    zc.on("update", () => console.log("[bonjour] event:update"));
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     zc.on("resolved", (service: any) => {
+      // eslint-disable-next-line no-console
+      console.log("[bonjour] event:resolved", {
+        name: service?.name,
+        host: service?.host,
+        port: service?.port,
+        addresses: service?.addresses,
+        txt: service?.txt,
+      });
       clearTimeout(timer);
       const txtRaw = (service?.txt as Record<string, string> | undefined) ?? {};
-      finish({
-        name: String(service?.name ?? "Mac"),
-        type: String(service?.type ?? `_${WEND_SERVICE_TYPE}._${WEND_SERVICE_PROTOCOL}`),
-        host: String(service?.host ?? service?.addresses?.[0] ?? ""),
-        port: Number(service?.port ?? 9876),
-        txt: {
-          url: typeof txtRaw.url === "string" ? txtRaw.url : undefined,
-          host: typeof txtRaw.host === "string" ? txtRaw.host : undefined,
-          version: typeof txtRaw.version === "string" ? txtRaw.version : undefined,
-          pk: typeof txtRaw.pk === "string" ? txtRaw.pk : undefined,
+      finish(
+        {
+          name: String(service?.name ?? "Mac"),
+          type: String(
+            service?.type ?? `_${WEND_SERVICE_TYPE}._${WEND_SERVICE_PROTOCOL}`,
+          ),
+          host: String(service?.host ?? service?.addresses?.[0] ?? ""),
+          port: Number(service?.port ?? 9876),
+          txt: {
+            url: typeof txtRaw.url === "string" ? txtRaw.url : undefined,
+            host: typeof txtRaw.host === "string" ? txtRaw.host : undefined,
+            version:
+              typeof txtRaw.version === "string" ? txtRaw.version : undefined,
+            pk: typeof txtRaw.pk === "string" ? txtRaw.pk : undefined,
+          },
         },
-      });
+        "resolved",
+      );
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    zc.on("error", (err: any) => {
+      // eslint-disable-next-line no-console
+      console.warn("[bonjour] event:error", err);
+      finish(null, "error");
     });
 
-    // 'error' covers both module-level failures and per-scan failures
-    // (denied permission, no network, etc). Treat as "nothing found".
-    zc.on("error", () => finish(null));
-
     try {
-      // (type, protocol, domain) — keep in sync with the Mac side and
-      // with the `NSBonjourServices` Info.plist key.
       zc.scan(WEND_SERVICE_TYPE, WEND_SERVICE_PROTOCOL, WEND_SERVICE_DOMAIN);
-    } catch {
-      finish(null);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("[bonjour] scan threw", err);
+      finish(null, "scan-threw");
     }
   });
 }

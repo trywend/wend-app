@@ -76,6 +76,7 @@ import { typography } from "@/theme/tokens";
 import { useNoteEditor } from "@/lib/notes/useNoteEditor";
 import { useNotesList } from "@/lib/notes/useNotesList";
 import { useDispatch, type DispatchEvent } from "@/lib/dispatch/useDispatch";
+import { useResolvedDaemonURL } from "@/lib/dispatch/useResolvedDaemonURL";
 import {
   archiveNote,
   createNote,
@@ -192,10 +193,15 @@ export default function HomeScreen() {
   const [coachmarkVisible, setCoachmarkVisible] = useState(false);
   const { dispatch, running, cancel, isConfigured: daemonConfigured } =
     useDispatch();
+  const resolvedDaemon = useResolvedDaemonURL();
 
   const bodyRef = useRef<TextInput>(null);
   const followUpRefs = useRef<Record<number, TextInput | null>>({});
   const scrollRef = useRef<ScrollView>(null);
+  // Bumped every time the user edits the title — any in-flight auto-title
+  // generation captures the value at start and discards its result if the
+  // user-typed value has changed since.
+  const titleEditTokenRef = useRef(0);
 
   // Cursor selection per editable field. We track these so the markdown
   // toolbar can insert at the cursor (and wrap a selected range) instead of
@@ -245,6 +251,25 @@ export default function HomeScreen() {
   const nextPromptSource = isFirstSend ? body : lastFollowUp;
   const canSend = nextPromptSource.trim().length > 0;
   const isStreaming = running || inflight?.status === "running";
+
+  // Markdown hint — lights up when the line at the cursor starts with a
+  // markdown token. The body TextInput can't multi-style its editable text
+  // (RN limitation), so this chip is the only feedback that the daemon will
+  // parse `# hey` as a heading.
+  const activeMarkdownHint = useMemo(
+    () =>
+      detectMarkdownToken(
+        isFirstSend ? body : lastFollowUp,
+        isFirstSend ? bodySelection.start : followUpSelection.start,
+      ),
+    [
+      isFirstSend,
+      body,
+      lastFollowUp,
+      bodySelection.start,
+      followUpSelection.start,
+    ],
+  );
 
   const showCaretOverlay = isBodyEmpty && bodyFocused && !hasRuns;
 
@@ -456,6 +481,29 @@ export default function HomeScreen() {
     }
 
     const prompt = candidate;
+
+    // Auto-title: when the user sends an untitled first dispatch, fire a
+    // small parallel Claude call to summarize the body into a 2–6 word
+    // title. Non-blocking; if the user types a title before this resolves
+    // we discard the result.
+    if (
+      isFirstSend &&
+      title.trim().length === 0 &&
+      body.trim().length > 0
+    ) {
+      const startToken = titleEditTokenRef.current;
+      void generateAutoTitle({
+        url: resolvedDaemon.url,
+        token: resolvedDaemon.token,
+        body,
+      }).then((suggested) => {
+        if (!suggested) return;
+        if (titleEditTokenRef.current !== startToken) return;
+        if (title.trim().length > 0) return;
+        setTitle(suggested);
+      });
+    }
+
     // For overrides (retry), don't continue the prior session — it errored,
     // so the sessionId may not be valid. Start fresh.
     const sessionId = promptOverride
@@ -856,7 +904,10 @@ export default function HomeScreen() {
         >
           <TextInput
             value={title}
-            onChangeText={setTitle}
+            onChangeText={(t) => {
+              titleEditTokenRef.current += 1;
+              setTitle(t);
+            }}
             placeholder={hasContent ? "Title" : "New note"}
             placeholderTextColor={placeholderColor}
             selectionColor={tokens["accent-caret"]}
@@ -1014,36 +1065,45 @@ export default function HomeScreen() {
         </ScrollView>
 
         {/* ─── Top-edge reveal strip (S1 only) ─────────────────────────
-            56px Pressable pinned to the top edge, ABOVE the
-            ScrollView/TextInput in z-order so the focused body input
-            can't intercept the tap. Visible handle marks the target. */}
+            Outer View owns the absolute layout — NativeWind/Pressable
+            interaction bug: layout props inside a function-callback
+            style are silently dropped on Android, so the hit area
+            ended up somewhere wrong. Inner Pressable only handles
+            press feedback. */}
         {!showTopBar ? (
-          <Pressable
-            onPress={revealTopBar}
-            accessibilityRole="button"
-            accessibilityLabel="Show top bar"
-            style={({ pressed }) => ({
+          <View
+            pointerEvents="box-none"
+            style={{
               position: "absolute",
               top: 0,
               left: 0,
               right: 0,
               height: REVEAL_STRIP_HEIGHT,
               zIndex: 50,
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: pressed ? 0.6 : 1,
-            })}
+            }}
           >
-            <View
-              style={{
-                width: 40,
-                height: 4,
-                borderRadius: 2,
-                backgroundColor: borderColor,
-                opacity: 0.55,
-              }}
-            />
-          </Pressable>
+            <Pressable
+              onPress={revealTopBar}
+              accessibilityRole="button"
+              accessibilityLabel="Show top bar"
+              style={({ pressed }) => ({
+                flex: 1,
+                alignItems: "center",
+                justifyContent: "center",
+                opacity: pressed ? 0.6 : 1,
+              })}
+            >
+              <View
+                style={{
+                  width: 40,
+                  height: 4,
+                  borderRadius: 2,
+                  backgroundColor: borderColor,
+                  opacity: 0.55,
+                }}
+              />
+            </Pressable>
+          </View>
         ) : null}
 
         {/* ─── Confidence chip (S13) ──────────────────────────────────── */}
@@ -1263,6 +1323,33 @@ export default function HomeScreen() {
               />
             </ScrollView>
 
+            {/* MD hint chip — lights up when the cursor line starts with a
+                markdown token. The only feedback the user gets that their
+                `# hey` will render as a heading on the receiving side, since
+                the body TextInput can't multi-style its own text. */}
+            {activeMarkdownHint ? (
+              <View
+                style={{
+                  paddingHorizontal: 8,
+                  paddingVertical: 4,
+                  borderRadius: 6,
+                  backgroundColor: `${accent}1F`,
+                  flexShrink: 0,
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily: "JetBrainsMono-Medium",
+                    fontSize: 10,
+                    letterSpacing: 0.4,
+                    color: accent,
+                  }}
+                >
+                  MD · {activeMarkdownHint}
+                </Text>
+              </View>
+            ) : null}
+
             {/* Attach — sits in its own group, with a hairline divider
                 separating the formatting group from action affordances. */}
             <View
@@ -1272,74 +1359,84 @@ export default function HomeScreen() {
                 backgroundColor: borderColor,
               }}
             />
-            <Pressable
-              onPress={() => {
-                if (!resolvedNoteId) return;
-                Keyboard.dismiss();
-                setAttachmentPickerOpen(true);
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Attach file"
-              android_ripple={ANDROID_ICON_RIPPLE}
-              style={({ pressed }) => ({
-                width: 40,
-                height: 40,
-                alignItems: "center",
-                justifyContent: "center",
-                borderRadius: 10,
-                opacity: pressed ? 0.55 : 1,
-                transform: [{ scale: pressed ? 0.94 : 1 }],
-              })}
-            >
-              <PaperclipIcon
-                size={20}
-                color={attachments.length > 0 ? accent : subtleColor}
-                weight={attachments.length > 0 ? "fill" : "regular"}
-              />
-            </Pressable>
+            <View style={{ width: 40, height: 40, borderRadius: 10, overflow: "hidden" }}>
+              <Pressable
+                onPress={() => {
+                  if (!resolvedNoteId) return;
+                  Keyboard.dismiss();
+                  setAttachmentPickerOpen(true);
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Attach file"
+                android_ripple={ANDROID_ICON_RIPPLE}
+                style={({ pressed }) => ({
+                  flex: 1,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  opacity: pressed ? 0.55 : 1,
+                  transform: [{ scale: pressed ? 0.94 : 1 }],
+                })}
+              >
+                <PaperclipIcon
+                  size={20}
+                  color={attachments.length > 0 ? accent : subtleColor}
+                  weight={attachments.length > 0 ? "fill" : "regular"}
+                />
+              </Pressable>
+            </View>
 
-            {/* Send — keep the prominent ember pill. Slightly larger
-                (40×40) to match the new touch-target rhythm. */}
-            <Pressable
-              onPress={isStreaming ? handleStop : () => void handleSend()}
-              disabled={!isStreaming && !canSend}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: !isStreaming && !canSend }}
-              accessibilityLabel={isStreaming ? "Stop dispatch" : "Send note"}
-              android_ripple={Platform.select({
-                android: {
-                  color: "rgba(255,255,255,0.20)",
-                  borderless: false,
-                  foreground: true,
-                } as const,
-                default: undefined,
-              })}
-              style={({ pressed }) => ({
+            {/* Send — outer View owns sizing + background color (these
+                drop on Android inside a Pressable function-callback
+                style on some devices, which is how the icon ended up
+                rendering white-on-white). Inner Pressable only carries
+                press feedback. */}
+            <View
+              style={{
                 width: 40,
                 height: 40,
                 borderRadius: 20,
-                alignItems: "center",
-                justifyContent: "center",
+                overflow: "hidden",
                 backgroundColor: isStreaming || canSend ? accent : surfaceChip,
                 opacity: isStreaming || canSend ? 1 : 0.6,
-                transform: [{ scale: pressed ? 0.94 : 1 }],
                 shadowColor: "#000",
                 shadowOpacity: canSend ? 0.18 : 0,
                 shadowRadius: 6,
                 shadowOffset: { width: 0, height: 2 },
                 elevation: canSend ? 3 : 0,
-              })}
+              }}
             >
-              {isStreaming ? (
-                <StopIcon size={16} color={accentOn} weight="fill" />
-              ) : (
-                <ArrowUpIcon
-                  size={18}
-                  color={canSend ? accentOn : tokens["text-tertiary"]}
-                  weight="bold"
-                />
-              )}
-            </Pressable>
+              <Pressable
+                onPress={isStreaming ? handleStop : () => void handleSend()}
+                disabled={!isStreaming && !canSend}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: !isStreaming && !canSend }}
+                accessibilityLabel={isStreaming ? "Stop dispatch" : "Send note"}
+                android_ripple={Platform.select({
+                  android: {
+                    color: "rgba(255,255,255,0.20)",
+                    borderless: false,
+                    foreground: true,
+                  } as const,
+                  default: undefined,
+                })}
+                style={({ pressed }) => ({
+                  flex: 1,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  transform: [{ scale: pressed ? 0.94 : 1 }],
+                })}
+              >
+                {isStreaming ? (
+                  <StopIcon size={16} color={accentOn} weight="fill" />
+                ) : (
+                  <ArrowUpIcon
+                    size={18}
+                    color={canSend ? accentOn : tokens["text-tertiary"]}
+                    weight="bold"
+                  />
+                )}
+              </Pressable>
+            </View>
           </Animated.View>
         ) : null}
 
@@ -1375,29 +1472,12 @@ export default function HomeScreen() {
               }}
             >
               {shouldShowCoachmark ? <FirstNoteCoachmark /> : null}
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ disabled: !canSend }}
-                accessibilityLabel="Send note"
-                onPress={() => {
-                  if (coachmarkVisible) dismissCoachmark();
-                  void handleSend();
-                }}
-                disabled={!canSend}
-                android_ripple={Platform.select({
-                  android: {
-                    color: "rgba(255,255,255,0.22)",
-                    borderless: false,
-                    foreground: true,
-                  } as const,
-                  default: undefined,
-                })}
-                style={({ pressed }) => ({
+              <View
+                style={{
                   width: 56,
                   height: 56,
                   borderRadius: 28,
-                  alignItems: "center",
-                  justifyContent: "center",
+                  overflow: "hidden",
                   backgroundColor: canSend ? accent : surfaceChip,
                   opacity: canSend ? 1 : 0.6,
                   borderWidth: canSend ? 0 : 1,
@@ -1407,15 +1487,39 @@ export default function HomeScreen() {
                   shadowRadius: canSend ? 10 : 2,
                   shadowOffset: { width: 0, height: canSend ? 4 : 1 },
                   elevation: canSend ? 4 : 1,
-                  transform: [{ scale: pressed && canSend ? 0.95 : 1 }],
-                })}
+                }}
               >
-                <ArrowUpIcon
-                  size={24}
-                  color={canSend ? accentOn : tokens["text-tertiary"]}
-                  weight="bold"
-                />
-              </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: !canSend }}
+                  accessibilityLabel="Send note"
+                  onPress={() => {
+                    if (coachmarkVisible) dismissCoachmark();
+                    void handleSend();
+                  }}
+                  disabled={!canSend}
+                  android_ripple={Platform.select({
+                    android: {
+                      color: "rgba(255,255,255,0.22)",
+                      borderless: false,
+                      foreground: true,
+                    } as const,
+                    default: undefined,
+                  })}
+                  style={({ pressed }) => ({
+                    flex: 1,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    transform: [{ scale: pressed && canSend ? 0.95 : 1 }],
+                  })}
+                >
+                  <ArrowUpIcon
+                    size={24}
+                    color={canSend ? accentOn : tokens["text-tertiary"]}
+                    weight="bold"
+                  />
+                </Pressable>
+              </View>
             </View>
           </Pressable>
         ) : null}
@@ -1546,23 +1650,23 @@ function IconButton(props: {
   accessibilityLabel: string;
 }) {
   return (
-    <Pressable
-      onPress={props.onPress}
-      accessibilityRole="button"
-      accessibilityLabel={props.accessibilityLabel}
-      android_ripple={ANDROID_ICON_RIPPLE}
-      style={({ pressed }) => ({
-        width: 36,
-        height: 36,
-        alignItems: "center",
-        justifyContent: "center",
-        borderRadius: 8,
-        opacity: pressed ? 0.55 : 1,
-        transform: [{ scale: pressed ? 0.95 : 1 }],
-      })}
-    >
-      {props.icon}
-    </Pressable>
+    <View style={{ width: 36, height: 36, borderRadius: 8, overflow: "hidden" }}>
+      <Pressable
+        onPress={props.onPress}
+        accessibilityRole="button"
+        accessibilityLabel={props.accessibilityLabel}
+        android_ripple={ANDROID_ICON_RIPPLE}
+        style={({ pressed }) => ({
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          opacity: pressed ? 0.55 : 1,
+          transform: [{ scale: pressed ? 0.95 : 1 }],
+        })}
+      >
+        {props.icon}
+      </Pressable>
+    </View>
   );
 }
 
@@ -1575,24 +1679,24 @@ function MarkdownButton(props: {
   icon: React.ReactNode;
 }) {
   return (
-    <Pressable
-      onPress={props.onPress}
-      accessibilityRole="button"
-      accessibilityLabel={props.accessibilityLabel}
-      hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}
-      android_ripple={ANDROID_ICON_RIPPLE}
-      style={({ pressed }) => ({
-        width: 40,
-        height: 40,
-        alignItems: "center",
-        justifyContent: "center",
-        borderRadius: 8,
-        opacity: pressed ? 0.55 : 1,
-        transform: [{ scale: pressed ? 0.94 : 1 }],
-      })}
-    >
-      {props.icon}
-    </Pressable>
+    <View style={{ width: 40, height: 40, borderRadius: 8, overflow: "hidden" }}>
+      <Pressable
+        onPress={props.onPress}
+        accessibilityRole="button"
+        accessibilityLabel={props.accessibilityLabel}
+        hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}
+        android_ripple={ANDROID_ICON_RIPPLE}
+        style={({ pressed }) => ({
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          opacity: pressed ? 0.55 : 1,
+          transform: [{ scale: pressed ? 0.94 : 1 }],
+        })}
+      >
+        {props.icon}
+      </Pressable>
+    </View>
   );
 }
 
@@ -1677,54 +1781,61 @@ function FollowUpInput(props: {
         }}
       />
       {props.showSend ? (
-        <Pressable
-          onPress={props.isStreaming ? props.onStop : props.onSend}
-          disabled={!props.isStreaming && !props.canSend}
-          accessibilityRole="button"
-          accessibilityLabel={
-            props.isStreaming ? "Stop dispatch" : "Send follow-up"
-          }
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          android_ripple={Platform.select({
-            android: {
-              color: "rgba(255,255,255,0.20)",
-              borderless: false,
-              foreground: true,
-            } as const,
-            default: undefined,
-          })}
-          style={({ pressed }) => ({
+        <View
+          style={{
             width: 40,
             height: 40,
             borderRadius: 20,
+            overflow: "hidden",
             backgroundColor:
               props.isStreaming || props.canSend
                 ? props.accentColor
                 : props.surfaceChipColor,
-            alignItems: "center",
-            justifyContent: "center",
             opacity: props.isStreaming || props.canSend ? 1 : 0.55,
-            transform: [{ scale: pressed ? 0.94 : 1 }],
             shadowColor: "#000",
             shadowOpacity: props.canSend ? 0.18 : 0,
             shadowRadius: 6,
             shadowOffset: { width: 0, height: 2 },
             elevation: props.canSend ? 3 : 0,
             flexShrink: 0,
-          })}
+          }}
         >
-          {props.isStreaming ? (
-            <StopIcon size={16} color={props.accentOnColor} weight="fill" />
-          ) : (
-            <ArrowUpIcon
-              size={18}
-              color={
-                props.canSend ? props.accentOnColor : props.tertiaryColor
-              }
-              weight="bold"
-            />
-          )}
-        </Pressable>
+          <Pressable
+            onPress={props.isStreaming ? props.onStop : props.onSend}
+            disabled={!props.isStreaming && !props.canSend}
+            accessibilityRole="button"
+            accessibilityLabel={
+              props.isStreaming ? "Stop dispatch" : "Send follow-up"
+            }
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            android_ripple={Platform.select({
+              android: {
+                color: "rgba(255,255,255,0.20)",
+                borderless: false,
+                foreground: true,
+              } as const,
+              default: undefined,
+            })}
+            style={({ pressed }) => ({
+              flex: 1,
+              alignItems: "center",
+              justifyContent: "center",
+              transform: [{ scale: pressed ? 0.94 : 1 }],
+            })}
+          >
+            {props.isStreaming ? (
+              <StopIcon size={16} color={props.accentOnColor} weight="fill" />
+            ) : (
+              <ArrowUpIcon
+                size={18}
+                color={
+                  props.canSend ? props.accentOnColor : props.tertiaryColor
+                }
+                weight="bold"
+              />
+            )}
+          </Pressable>
+        </View>
       ) : null}
     </View>
   );
@@ -1970,6 +2081,89 @@ function insertMarkdown(
   // Cursor lands on "url" so the user can replace it immediately.
   const urlStart = start + label.length + 3; // "[" + label + "](" → 3 chars after label
   return { text, cursor: urlStart };
+}
+
+/** Race-friendly auto-title generation. POSTs directly to `/run` instead of
+ *  going through useDispatch so it doesn't collide with the main dispatch's
+ *  abort controller / running flag. Returns null when the daemon is
+ *  un-configured, the network fails, or Claude returns nothing useful. */
+async function generateAutoTitle(args: {
+  url: string;
+  token: string;
+  body: string;
+}): Promise<string | null> {
+  if (!args.url || !args.token) return null;
+  const excerpt = args.body.trim().slice(0, 500);
+  if (excerpt.length === 0) return null;
+  const prompt = `Generate a 2-6 word title (no quotes, no period) for this note body:\n\n"""\n${excerpt}\n"""\n\nReply with the title only.`;
+  try {
+    const { fetch: expoFetch } = await import("expo/fetch");
+    const url = `${args.url.replace(/\/$/, "")}/run?t=${encodeURIComponent(args.token)}`;
+    const res = await expoFetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ prompt }),
+    });
+    if (!res.ok || !res.body) return null;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let title = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const frames = buf.split("\n\n");
+      buf = frames.pop() ?? "";
+      for (const frame of frames) {
+        const dataLine = frame
+          .split("\n")
+          .find((l) => l.startsWith("data:"));
+        if (!dataLine) continue;
+        const payload = dataLine.slice(dataLine.startsWith("data: ") ? 6 : 5).trim();
+        if (!payload) continue;
+        try {
+          const json = JSON.parse(payload);
+          if (json.type === "assistant" && Array.isArray(json.message?.content)) {
+            for (const c of json.message.content) {
+              if (c.type === "text" && typeof c.text === "string") title += c.text;
+            }
+          }
+        } catch {
+          // skip non-JSON frames
+        }
+      }
+    }
+    const cleaned = title
+      .trim()
+      .replace(/^["'`]+|["'`]+$/g, "")
+      .replace(/\.+$/, "")
+      .replace(/\s+/g, " ")
+      .slice(0, 60);
+    return cleaned.length > 0 ? cleaned : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Detect the markdown token (if any) on the line containing the cursor.
+ *  Returns a short label for the toolbar hint chip. */
+function detectMarkdownToken(text: string, cursor: number): string | null {
+  if (text.length === 0) return null;
+  const c = Math.max(0, Math.min(cursor, text.length));
+  let lineStart = c;
+  while (lineStart > 0 && text[lineStart - 1] !== "\n") lineStart--;
+  let lineEnd = c;
+  while (lineEnd < text.length && text[lineEnd] !== "\n") lineEnd++;
+  const line = text.slice(lineStart, lineEnd);
+  if (/^###\s/.test(line)) return "H3";
+  if (/^##\s/.test(line)) return "H2";
+  if (/^#\s/.test(line)) return "H1";
+  if (/^>\s?/.test(line)) return "Quote";
+  if (/^-\s/.test(line) || /^\*\s/.test(line)) return "List";
+  if (/^\d+\.\s/.test(line)) return "List";
+  if (/^```/.test(line)) return "Code";
+  return null;
 }
 
 /** Phase 2 stub for dispatch detection — grabs the first ticket-like token
