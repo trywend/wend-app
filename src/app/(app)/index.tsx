@@ -94,6 +94,7 @@ import { useDaemonStore } from "@/store/daemonSlice";
 import { useOnboardingStore } from "@/store/onboardingSlice";
 import { useSignOut } from "@/auth/client";
 import { Text } from "@/components/primitives";
+import { WendWordmark } from "@/components/primitives/Logo";
 import { CommandPalette } from "@/components/CommandPalette";
 import { InboxSheet } from "@/components/InboxSheet";
 import { SettingsSheet } from "@/components/SettingsSheet";
@@ -792,16 +793,11 @@ export default function HomeScreen() {
             <View
               style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
             >
-              <Text
-                style={{
-                  fontFamily: "Inter-SemiBold",
-                  fontSize: 17,
-                  color: inkColor,
-                  letterSpacing: -0.17,
-                }}
-              >
-                Wend
-              </Text>
+              <WendWordmark
+                height={18}
+                inkColor={inkColor}
+                counterColor={canvas}
+              />
               {/* Daemon-reachability pip, sits next to the wordmark so it's
                   visible at a glance without taking nav-bar real estate. */}
               <HealthDot size={8} />
