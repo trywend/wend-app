@@ -53,7 +53,7 @@ export type DispatchEvent =
       cwd: string;
       name: string;
       confidence: number;
-      source: "auto" | "pinned" | "fallback";
+      source: "auto" | "pinned" | "fallback" | "cloud";
     }
   | { type: "error"; message: string }
   | { type: "done" };
@@ -266,7 +266,7 @@ function parseFrame(rawFrame: string, onEvent: (e: DispatchEvent) => void) {
           name: r.name,
           confidence: typeof r.confidence === "number" ? r.confidence : 0,
           source:
-            r.source === "auto" || r.source === "pinned" || r.source === "fallback"
+            r.source === "auto" || r.source === "pinned" || r.source === "fallback" || r.source === "cloud"
               ? r.source
               : "auto",
         });

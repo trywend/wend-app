@@ -133,7 +133,7 @@ interface InflightRun {
    *  by the first `route` event from the SSE stream. */
   routeName: string | null;
   routeCwd: string | null;
-  routeSource: "auto" | "pinned" | "fallback" | null;
+  routeSource: "auto" | "pinned" | "fallback" | "cloud" | null;
 }
 
 const INITIAL_INFLIGHT: InflightRun | null = null;
