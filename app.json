@@ -33,7 +33,10 @@
         "READ_EXTERNAL_STORAGE",
         "POST_NOTIFICATIONS",
         "VIBRATE",
-        "INTERNET"
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "ACCESS_WIFI_STATE",
+        "CHANGE_WIFI_MULTICAST_STATE"
       ]
     },
     "notification": {

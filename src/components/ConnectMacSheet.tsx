@@ -263,6 +263,10 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
   /** The Mac surfaced by Bonjour. Carried into the "discovered" and
    *  "approving" views so we can re-poll on retry without re-scanning. */
   const [discovered, setDiscovered] = useState<DiscoveredDaemon | null>(null);
+  /** Set true when Bonjour discovery completed without finding a Mac. Drives
+   *  the small "not found on this WiFi" hint above the QR scanner so the
+   *  user knows why they fell through. */
+  const [bonjourFellBack, setBonjourFellBack] = useState(false);
   /** Lock so a sequence of QR detections in the same camera frame doesn't
    *  fire the handler twice and double-write the store. Released on
    *  error or re-mount. */
@@ -298,6 +302,7 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
       setPairedHost(null);
       setManualText("");
       setDiscovered(null);
+      setBonjourFellBack(false);
       lockRef.current = false;
     }
   }, [open, bonjourAvailable]);
@@ -317,7 +322,9 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
         setDiscovered(found);
         setMode("discovered");
       } else {
-        // Silent fall-through to the camera (or OTP) path.
+        // Fall through to QR but surface a small breadcrumb — the user
+        // expected Bonjour to surface the Mac on the same WiFi.
+        setBonjourFellBack(true);
         setMode(cameraAvailable ? "scanning" : "code");
       }
     })();
@@ -566,7 +573,9 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
                 color: subtle,
               }}
             >
-              Scan the QR code from Wend.app on your Mac.
+              {bonjourFellBack
+                ? "No Mac found on this WiFi. Scan the QR from Wend.app."
+                : "Scan the QR code from Wend.app on your Mac."}
             </Text>
           </View>
           <Pressable
