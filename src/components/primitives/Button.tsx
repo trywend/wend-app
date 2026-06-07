@@ -12,11 +12,21 @@
  * Disabled drops opacity + ignores presses. 44pt min touch target honored via
  * py + min-height utility on each size.
  */
-import { Pressable, type PressableProps, View } from "react-native";
+import { Platform, Pressable, type PressableProps, View } from "react-native";
 import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/cn";
 import { Text } from "./Text";
+
+/** Material-style ripple for Android. iOS leaves this undefined so the
+ *  existing active:bg-* / opacity feedback (set via cva) is the only
+ *  press affordance — keeps the iOS look pixel-identical. The borderless:
+ *  false here is deliberate: buttons have a rounded rect that we want the
+ *  ripple to be clipped to. */
+const ANDROID_BUTTON_RIPPLE = Platform.select({
+  android: { color: "rgba(0,0,0,0.10)", borderless: false } as const,
+  default: undefined,
+});
 
 const container = cva(
   "flex-row items-center justify-center rounded-block",
@@ -72,6 +82,7 @@ export function Button({
       accessibilityRole="button"
       accessibilityState={{ disabled: !!disabled }}
       disabled={!!disabled}
+      android_ripple={ANDROID_BUTTON_RIPPLE}
       className={cn(container({ variant, size, disabled }), className)}
       {...props}
     >

@@ -36,6 +36,7 @@ import { useUser } from "@clerk/clerk-expo";
 import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
 import { useUiStore } from "@/store/uiSlice";
+import { useAndroidBack } from "@/lib/useAndroidBack";
 
 export interface IntegrationsSheetProps {
   open: boolean;
@@ -54,6 +55,8 @@ function IntegrationsSheetMounted({
   onClose,
   onConnectGitHub,
 }: IntegrationsSheetProps) {
+  // Android hardware back closes this sheet (stacked above SettingsSheet).
+  useAndroidBack(true, onClose);
   const { tokens } = useTheme();
   const linearConnected = useUiStore((s) => s.linearConnected);
   const setLinearConnected = useUiStore((s) => s.setLinearConnected);

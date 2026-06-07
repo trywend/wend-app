@@ -71,6 +71,7 @@ import {
 
 import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
+import { useAndroidBack } from "@/lib/useAndroidBack";
 import {
   classifyAttachment,
   formatFileSize,
@@ -139,6 +140,8 @@ function Mounted({
   sizeBytes,
 }: FileViewerModalProps) {
   const { tokens } = useTheme();
+  // Android hardware back closes the viewer.
+  useAndroidBack(true, onClose);
 
   const displayName = useMemo(() => name?.trim() || basename(path), [name, path]);
   const kind: AttachmentKind = useMemo(

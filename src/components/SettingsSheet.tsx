@@ -52,6 +52,7 @@ import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
 import { useUiStore, type ThemePreference } from "@/store/uiSlice";
 import { useDaemonStore } from "@/store/daemonSlice";
+import { useAndroidBack } from "@/lib/useAndroidBack";
 
 /** Rendezvous backend that hosts the Linear OAuth routes. Kept inline
  *  for the same reason as in ConnectGitHubSheet — this file is in the
@@ -86,6 +87,10 @@ function SettingsSheetMounted({
   onConnectMac,
   onShowComingSoon,
 }: SettingsSheetProps) {
+  // Android hardware back: close this sheet rather than exiting the app.
+  // See src/lib/useAndroidBack.ts — listener is LIFO so stacked sheets
+  // (e.g. IntegrationsSheet over this one) win first.
+  useAndroidBack(true, onClose);
   const { tokens } = useTheme();
   const preference = useUiStore((s) => s.themePreference);
   const setPreference = useUiStore((s) => s.setThemePreference);
