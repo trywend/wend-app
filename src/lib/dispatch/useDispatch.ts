@@ -37,6 +37,7 @@ import { buildPrompt } from "@/lib/dispatch/buildPrompt";
 import { useCloudStore, effectiveDispatchTarget } from "@/store/cloudSlice";
 import { useNotificationsStore } from "@/store/notificationsSlice";
 import { cloudDispatchViaWebSocket } from "@/lib/dispatch/cloudDispatch";
+import { uploadAttachmentToDaemon } from "@/lib/attachments";
 
 const TEMPUS_API_URL = (process.env.EXPO_PUBLIC_TEMPUS_API_URL || "").replace(/\/$/, "");
 const TEMPUS_WS_URL = (process.env.EXPO_PUBLIC_TEMPUS_WS_URL || "").replace(/\/$/, "");
@@ -79,6 +80,10 @@ export interface DispatchArgs {
   /** Note title for push-notification body. Sent to both Mac and Cloud
    *  routes so they can address the "your note ran" push correctly. */
   noteTitle?: string;
+  /** Local attachments to deliver to the daemon before the run. Each is
+   *  uploaded to /upload; the staged absolute paths are referenced in the
+   *  dispatch so Claude can read them. Mac route only — cloud ignores. */
+  attachments?: Array<{ localUri: string; name: string; mimeType: string }>;
   /** Called for every SSE frame parsed off the wire. */
   onEvent: (event: DispatchEvent) => void;
   /** Abort signal — passed straight through to expo/fetch. */
@@ -204,6 +209,31 @@ export function useDispatch(): UseDispatchResult {
     // un-configured daemon shouldn't flip the pip on at all.
     useDispatchStore.getState().setRunningNoteId(args.noteId ?? null);
     try {
+      // Upload attachments first (if any) so the daemon has them staged
+      // before claude spawns. Failures are non-fatal — we drop the file
+      // and proceed so a flaky upload doesn't sink the whole dispatch.
+      let uploadedAttachments: Array<{ path: string; name: string }> = [];
+      if (args.attachments?.length) {
+        const results = await Promise.all(
+          args.attachments.map(async (att) => {
+            try {
+              return await uploadAttachmentToDaemon({
+                baseUrl: creds.url,
+                token: creds.token,
+                noteId: args.noteId ?? "shared",
+                attachment: att,
+              });
+            } catch (e) {
+              // eslint-disable-next-line no-console
+              console.warn("[wend] attachment upload failed:", att.name, e);
+              return null;
+            }
+          }),
+        );
+        uploadedAttachments = results.filter(
+          (r): r is { path: string; name: string } => r !== null,
+        );
+      }
       // Wrap the raw note in light deterministic framing so Claude has the
       // intent of a phone-sized message. Follow-up turns skip framing — the
       // resumed session already has the original framing in its history.
@@ -227,6 +257,7 @@ export function useDispatch(): UseDispatchResult {
           pushToken: pushToken || undefined,
           noteId: args.noteId,
           noteTitle: args.noteTitle,
+          attachments: uploadedAttachments.length ? uploadedAttachments : undefined,
         }),
         signal: controller.signal,
       });
@@ -276,7 +307,7 @@ export function useDispatch(): UseDispatchResult {
       useDispatchStore.getState().setRunningNoteId(null);
       if (abortRef.current === controller) abortRef.current = null;
     }
-  }, []);
+  }, [target, resolved, getToken, pushToken]);
 
   const cancel = useCallback(() => {
     abortRef.current?.abort();

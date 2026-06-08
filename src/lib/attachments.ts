@@ -190,6 +190,40 @@ export async function copyAttachmentIntoNote(args: {
 }
 
 /**
+ * Upload one attachment's bytes to the Mac daemon's /upload endpoint and
+ * return the absolute path the daemon staged it at. The dispatch then
+ * references that path so Claude can read the file. Raw-binary upload
+ * (expo-file-system's default uploadType) — the daemon reads the request
+ * body verbatim. Throws on any non-2xx so the caller can decide whether to
+ * proceed without the file.
+ */
+export async function uploadAttachmentToDaemon(args: {
+  baseUrl: string;
+  token: string;
+  noteId: string;
+  attachment: Pick<Attachment, "localUri" | "name" | "mimeType">;
+}): Promise<{ path: string; name: string }> {
+  assertFS();
+  const { baseUrl, token, noteId, attachment } = args;
+  const url =
+    `${baseUrl.replace(/\/$/, "")}/upload` +
+    `?t=${encodeURIComponent(token)}` +
+    `&noteId=${encodeURIComponent(noteId)}` +
+    `&name=${encodeURIComponent(attachment.name)}`;
+  const file = new File(attachment.localUri);
+  const res = await file.upload(url, {
+    httpMethod: "POST",
+    headers: { "content-type": attachment.mimeType || "application/octet-stream" },
+  });
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`upload failed: HTTP ${res.status}`);
+  }
+  const body = JSON.parse(res.body) as { path?: string; name?: string };
+  if (!body.path) throw new Error("upload response missing path");
+  return { path: body.path, name: body.name ?? attachment.name };
+}
+
+/**
  * Best-effort removal of an attachment's bytes on disk. Returns true when
  * the file was deleted (or already gone), false on error. Metadata removal
  * is the caller's responsibility — we don't touch the notes store from here.

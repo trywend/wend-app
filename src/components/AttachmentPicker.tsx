@@ -31,7 +31,7 @@ import Animated, {
   SlideInDown,
   SlideOutDown,
 } from "react-native-reanimated";
-import { FileIcon, ImageIcon } from "phosphor-react-native";
+import { CaretRightIcon, FileIcon, ImageIcon } from "phosphor-react-native";
 
 import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
@@ -291,7 +291,7 @@ function Mounted({
           variant="meta"
           style={{ color: subtle, marginBottom: 16, paddingHorizontal: 4 }}
         >
-          Files stay on this phone — Claude doesn't read them yet.
+          Staged on your Mac and read by Claude when the note runs.
         </Text>
 
         <PickerRow
@@ -304,6 +304,7 @@ function Mounted({
           border={border}
           ink={ink}
           subtle={subtle}
+          tertiary={tertiary}
         />
         <PickerRow
           label="Document"
@@ -315,6 +316,7 @@ function Mounted({
           border={border}
           ink={ink}
           subtle={subtle}
+          tertiary={tertiary}
         />
 
         {busy ? (
@@ -348,6 +350,7 @@ interface PickerRowProps {
   border: string;
   ink: string;
   subtle: string;
+  tertiary: string;
 }
 
 function PickerRow(props: PickerRowProps) {
@@ -364,10 +367,10 @@ function PickerRow(props: PickerRowProps) {
         gap: 14,
         paddingHorizontal: 14,
         paddingVertical: 14,
-        borderRadius: 14,
+        borderRadius: 16,
         borderWidth: 1,
         borderColor: props.border,
-        backgroundColor: pressed ? props.chipBg : "transparent",
+        backgroundColor: pressed ? props.chipBg : props.chipBg + "55",
         opacity: props.disabled ? 0.5 : 1,
         marginBottom: 10,
         overflow: "hidden",
@@ -375,9 +378,9 @@ function PickerRow(props: PickerRowProps) {
     >
       <View
         style={{
-          width: 40,
-          height: 40,
-          borderRadius: 20,
+          width: 42,
+          height: 42,
+          borderRadius: 21,
           alignItems: "center",
           justifyContent: "center",
           backgroundColor: props.chipBg,
@@ -393,6 +396,7 @@ function PickerRow(props: PickerRowProps) {
           {props.subtitle}
         </Text>
       </View>
+      <CaretRightIcon size={16} color={props.tertiary} weight="bold" />
     </Pressable>
   );
 }

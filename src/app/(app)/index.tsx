@@ -585,6 +585,16 @@ export default function HomeScreen() {
       // inbox renders a running pip on the matching card.
       noteId: resolvedNoteId || undefined,
       noteTitle: title.trim() || body.trim().split("\n")[0]?.slice(0, 60) || "Untitled note",
+      // Deliver the note's attachments to the daemon for this run so Claude
+      // can read them. Re-sent each turn (the daemon overwrites by name) so
+      // follow-ups keep access without the phone tracking staged paths.
+      attachments: attachments.length
+        ? attachments.map((a) => ({
+            localUri: a.localUri,
+            name: a.name,
+            mimeType: a.mimeType,
+          }))
+        : undefined,
       onEvent: (e: DispatchEvent) => {
         if (e.type === "text") {
           accumulated += e.text;
