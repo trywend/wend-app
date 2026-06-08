@@ -46,40 +46,81 @@ export async function cloudDispatchViaWebSocket(args: CloudDispatchArgs): Promis
   }
 
   const url = `${WS_URL}?token=${encodeURIComponent(token)}`;
-  return new Promise<void>((resolve) => {
+  // Up to 2 attempts: the first frequently fights a Lambda cold start
+  // ($connect handler can take 2-3s to fire). If the WS closes before
+  // `dispatch` is acknowledged we retry once with backoff. Subsequent
+  // failures are surfaced.
+  const MAX_ATTEMPTS = 2;
+  const BACKOFF_MS = 800;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const result = await runOneAttempt(url, args, attempt);
+    if (result === "retry" && attempt < MAX_ATTEMPTS) {
+      await new Promise((r) => setTimeout(r, BACKOFF_MS));
+      continue;
+    }
+    return;
+  }
+}
+
+type AttemptResult = "done" | "retry";
+
+function runOneAttempt(
+  url: string,
+  args: CloudDispatchArgs,
+  attempt: number,
+): Promise<AttemptResult> {
+  return new Promise<AttemptResult>((resolve) => {
     const ws = new WebSocket(url);
     let opened = false;
+    let dispatched = false;
+    let receivedAck = false;
     let finished = false;
 
-    function finish(error?: { type: "error"; message: string }) {
+    function finishDone(error?: { type: "error"; message: string }) {
       if (finished) return;
       finished = true;
       if (error) args.onEvent(error);
       args.onEvent({ type: "done" });
       try { ws.close(); } catch { /* already closed */ }
-      resolve();
+      resolve("done");
+    }
+
+    function finishRetry() {
+      if (finished) return;
+      finished = true;
+      try { ws.close(); } catch { /* already closed */ }
+      resolve("retry");
     }
 
     if (args.signal) {
       if (args.signal.aborted) {
-        finish({ type: "error", message: "Cancelled" });
+        finishDone({ type: "error", message: "Cancelled" });
         return;
       }
       args.signal.addEventListener("abort", () => {
-        finish({ type: "error", message: "Cancelled" });
+        finishDone({ type: "error", message: "Cancelled" });
       });
     }
 
     ws.onopen = () => {
       opened = true;
-      ws.send(JSON.stringify({
-        action: "dispatch",
-        prompt: args.prompt,
-        repo: args.repo || undefined,
-        ref: args.ref || undefined,
-        sessionId: args.sessionId,
-        noteId: args.noteId,
-      }));
+      try {
+        ws.send(JSON.stringify({
+          action: "dispatch",
+          prompt: args.prompt,
+          repo: args.repo || undefined,
+          ref: args.ref || undefined,
+          sessionId: args.sessionId,
+          noteId: args.noteId,
+        }));
+        dispatched = true;
+      } catch (err) {
+        finishDone({
+          type: "error",
+          message: `Failed to send dispatch: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
     };
 
     ws.onmessage = (msg) => {
@@ -89,7 +130,7 @@ export async function cloudDispatchViaWebSocket(args: CloudDispatchArgs): Promis
         const data = payload.data ?? "";
 
         if (event === "ack") {
-          // Initial provisioning ack; nothing to surface yet.
+          receivedAck = true;
           return;
         }
         if (event === "route") {
@@ -118,24 +159,34 @@ export async function cloudDispatchViaWebSocket(args: CloudDispatchArgs): Promis
           return;
         }
         if (event === "done") {
-          finish();
+          finishDone();
           return;
         }
-        // Default: a Claude stream-json line. Reuse the existing parser.
         parseClaudeFrame(data, args.onEvent);
-      } catch {
-        // Non-JSON message — ignore.
-      }
+      } catch { /* non-JSON message */ }
     };
 
     ws.onerror = () => {
-      finish({ type: "error", message: opened ? "Cloud stream error" : "Failed to connect to cloud" });
+      // Errors before open and before any work means cold-start /
+      // transient — eligible to retry. Errors after dispatch are real.
+      if (!opened || !receivedAck) {
+        finishRetry();
+        return;
+      }
+      finishDone({ type: "error", message: "Cloud stream error" });
     };
 
     ws.onclose = (e) => {
       if (finished) return;
+      // Pre-open close or close before any ack means the WS handshake
+      // failed mid-flight. Cold-start lambdas occasionally drop the first
+      // $connect — retry once.
+      if (!receivedAck && attempt < 2) {
+        finishRetry();
+        return;
+      }
       const reason = e.reason || `closed (${e.code})`;
-      finish({ type: "error", message: `Cloud connection ${reason}` });
+      finishDone({ type: "error", message: `Cloud connection ${reason}` });
     };
   });
 }

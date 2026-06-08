@@ -93,6 +93,7 @@ import {
 import { useAuthStore } from "@/store/authSlice";
 import { useDaemonStore } from "@/store/daemonSlice";
 import { useOnboardingStore } from "@/store/onboardingSlice";
+import { useCloudStore } from "@/store/cloudSlice";
 import { useSignOut } from "@/auth/client";
 import { Text } from "@/components/primitives";
 import { WendWordmark } from "@/components/primitives/Logo";
@@ -104,6 +105,7 @@ import { ConnectGitHubSheet } from "@/components/ConnectGitHubSheet";
 import { ConnectMacSheet } from "@/components/ConnectMacSheet";
 import { ConnectAnthropicSheet } from "@/components/ConnectAnthropicSheet";
 import { CloudGitHubSheet } from "@/components/CloudGitHubSheet";
+import { CloudRepoPickerSheet } from "@/components/CloudRepoPickerSheet";
 import { NoteActionsSheet } from "@/components/NoteActionsSheet";
 import { AttachmentPicker } from "@/components/AttachmentPicker";
 import { FileViewerModal } from "@/components/FileViewerModal";
@@ -174,6 +176,8 @@ export default function HomeScreen() {
   const [connectMacOpen, setConnectMacOpen] = useState(false);
   const [connectAnthropicOpen, setConnectAnthropicOpen] = useState(false);
   const [cloudGitHubOpen, setCloudGitHubOpen] = useState(false);
+  const [repoPickerOpen, setRepoPickerOpen] = useState(false);
+  const dispatchMode = useCloudStore((s) => s.dispatchMode);
   const [noteActions, setNoteActions] = useState<{
     id: string;
     title: string;
@@ -1411,6 +1415,11 @@ export default function HomeScreen() {
             >
               <Pressable
                 onPress={isStreaming ? handleStop : () => void handleSend()}
+                onLongPress={
+                  isStreaming || dispatchMode !== "cloud"
+                    ? undefined
+                    : () => setRepoPickerOpen(true)
+                }
                 disabled={!isStreaming && !canSend}
                 accessibilityRole="button"
                 accessibilityState={{ disabled: !isStreaming && !canSend }}
@@ -1576,6 +1585,15 @@ export default function HomeScreen() {
       <CloudGitHubSheet
         open={cloudGitHubOpen}
         onClose={() => setCloudGitHubOpen(false)}
+      />
+      <CloudRepoPickerSheet
+        open={repoPickerOpen}
+        currentRepo={noteCwd}
+        onClose={() => setRepoPickerOpen(false)}
+        onPick={(fullName) => {
+          setCwd(fullName);
+          void saveNote({ id: resolvedNoteId, cwd: fullName });
+        }}
       />
       <IntegrationsSheet
         open={integrationsOpen}

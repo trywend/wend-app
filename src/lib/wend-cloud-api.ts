@@ -106,6 +106,19 @@ export function useWendCloudApi() {
     githubInstallUrl() {
       return authed<GithubInstallUrl>("/v1/connect/github/install-url");
     },
+
+    githubRepos() {
+      return authed<{
+        repos: Array<{
+          full_name: string;
+          name: string;
+          private: boolean;
+          default_branch: string;
+          pushed_at: string | null;
+          description: string | null;
+        }>;
+      }>("/v1/connect/github/repos");
+    },
   };
 }
 
