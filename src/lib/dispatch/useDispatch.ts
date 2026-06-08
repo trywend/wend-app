@@ -22,6 +22,7 @@
  */
 import { useCallback, useRef, useState } from "react";
 import { fetch as expoFetch } from "expo/fetch";
+import { useAuth } from "@clerk/clerk-expo";
 
 import {
   daemonCwd,
@@ -33,6 +34,9 @@ import { useDispatchStore } from "@/store/dispatchSlice";
 import { useDaemonStore } from "@/store/daemonSlice";
 import { useResolvedDaemonURL } from "@/lib/dispatch/useResolvedDaemonURL";
 import { buildPrompt } from "@/lib/dispatch/buildPrompt";
+import { useCloudStore, effectiveDispatchTarget } from "@/store/cloudSlice";
+
+const TEMPUS_API_URL = (process.env.EXPO_PUBLIC_TEMPUS_API_URL || "").replace(/\/$/, "");
 
 export type DispatchEvent =
   | { type: "text"; text: string }
@@ -95,8 +99,30 @@ export function useDispatch(): UseDispatchResult {
   // dispatch instead of capturing, so a slice update between renders
   // (e.g., user re-pairs mid-session) reflects on the next send.
   const resolved = useResolvedDaemonURL();
+  const { getToken } = useAuth();
+  const dispatchMode = useCloudStore((s) => s.dispatchMode);
+  const anthropicConnected = useCloudStore((s) => s.anthropicConnected);
+  const githubConnected = useCloudStore((s) => s.githubConnected);
+  const defaultRepo = useCloudStore((s) => s.defaultRepo);
+  const defaultRef = useCloudStore((s) => s.defaultRef);
+
+  const target = effectiveDispatchTarget(
+    { dispatchMode, anthropicConnected, githubConnected, defaultRepo, defaultRef } as never,
+    { macPaired: resolved.isReady },
+  );
+  const isCloudConfigured = anthropicConnected && githubConnected && defaultRepo.length > 0;
+  const isConfigured = target === "cloud" ? isCloudConfigured && Boolean(TEMPUS_API_URL) : resolved.isReady;
 
   const dispatch = useCallback(async (args: DispatchArgs) => {
+    if (target === "cloud") {
+      return dispatchCloud(args, {
+        repo: defaultRepo,
+        ref: defaultRef,
+        getToken,
+        abortRef,
+        setRunning,
+      });
+    }
     if (!resolved.isReady) {
       args.onEvent({
         type: "error",
@@ -207,9 +233,118 @@ export function useDispatch(): UseDispatchResult {
     abortRef.current?.abort();
   }, []);
 
-  // `resolved.isReady` already lives off the same store + env fallback,
-  // so the banner / dot react the instant a QR scan completes.
-  return { dispatch, running, cancel, isConfigured: resolved.isReady };
+  return { dispatch, running, cancel, isConfigured };
+}
+
+/** Cloud-dispatch path: hit the Tempus Lambda via API Gateway with the
+ *  user's Clerk JWT. SSE event vocabulary matches the Mac daemon
+ *  byte-for-byte (route, default JSONL frames, stderr, done) so the
+ *  parser below works unchanged. */
+async function dispatchCloud(
+  args: DispatchArgs,
+  ctx: {
+    repo: string;
+    ref: string;
+    getToken: ReturnType<typeof useAuth>["getToken"];
+    abortRef: { current: AbortController | null };
+    setRunning: (b: boolean) => void;
+  },
+): Promise<void> {
+  if (!TEMPUS_API_URL) {
+    args.onEvent({
+      type: "error",
+      message: "Cloud API URL missing — set EXPO_PUBLIC_TEMPUS_API_URL and rebuild.",
+    });
+    args.onEvent({ type: "done" });
+    return;
+  }
+  if (!ctx.repo) {
+    args.onEvent({
+      type: "error",
+      message: "No default repo set for cloud dispatches. Open Settings → Cloud → Default repo.",
+    });
+    args.onEvent({ type: "done" });
+    return;
+  }
+
+  const controller = new AbortController();
+  ctx.abortRef.current = controller;
+  if (args.signal) {
+    if (args.signal.aborted) controller.abort();
+    else args.signal.addEventListener("abort", () => controller.abort());
+  }
+
+  ctx.setRunning(true);
+  useDispatchStore.getState().setRunningNoteId(args.noteId ?? null);
+  try {
+    const token = await ctx.getToken();
+    if (!token) {
+      args.onEvent({ type: "error", message: "Not signed in." });
+      return;
+    }
+    const built = buildPrompt(args.prompt, {
+      followUp: Boolean(args.sessionId),
+      sessionId: args.sessionId,
+    });
+    const res = await expoFetch(`${TEMPUS_API_URL}/v1/cloud-dispatch`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+        accept: "text/event-stream",
+      },
+      body: JSON.stringify({
+        prompt: built.prompt,
+        repo: ctx.repo,
+        ref: ctx.ref,
+        sessionId: args.sessionId,
+        noteId: args.noteId,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
+      let detail = `Cloud dispatch failed: HTTP ${res.status}`;
+      try {
+        const body = await res.text();
+        const parsed = JSON.parse(body) as { detail?: string };
+        if (parsed.detail) detail = parsed.detail;
+      } catch { /* keep generic */ }
+      args.onEvent({ type: "error", message: detail });
+      return;
+    }
+    if (!res.body) {
+      args.onEvent({ type: "error", message: "Cloud dispatch returned no body" });
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split("\n\n");
+      buffer = frames.pop() ?? "";
+      for (const frame of frames) parseFrame(frame, args.onEvent);
+    }
+    if (buffer.trim()) parseFrame(buffer, args.onEvent);
+  } catch (err) {
+    if (controller.signal.aborted) {
+      args.onEvent({ type: "error", message: "Cancelled" });
+    } else {
+      args.onEvent({
+        type: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  } finally {
+    args.onEvent({ type: "done" });
+    ctx.setRunning(false);
+    useDispatchStore.getState().setRunningNoteId(null);
+    if (ctx.abortRef.current === controller) ctx.abortRef.current = null;
+  }
 }
 
 /* ───── Frame parser ─────────────────────────────────────────────────── */
