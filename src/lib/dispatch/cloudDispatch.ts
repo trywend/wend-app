@@ -24,6 +24,10 @@ export interface CloudDispatchArgs {
   ref?: string;
   sessionId?: string;
   noteId?: string;
+  noteTitle?: string;
+  /** Expo push token; passed to the cloud agent so the container can fire
+   *  a "your run is done" push when claude exits. */
+  pushToken?: string;
   getToken: () => Promise<string | null>;
   onEvent: (e: DispatchEvent) => void;
   signal?: AbortSignal;
@@ -113,6 +117,8 @@ function runOneAttempt(
           ref: args.ref || undefined,
           sessionId: args.sessionId,
           noteId: args.noteId,
+          noteTitle: args.noteTitle,
+          pushToken: args.pushToken || undefined,
         }));
         dispatched = true;
       } catch (err) {

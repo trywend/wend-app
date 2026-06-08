@@ -35,6 +35,7 @@ import { useDaemonStore } from "@/store/daemonSlice";
 import { useResolvedDaemonURL } from "@/lib/dispatch/useResolvedDaemonURL";
 import { buildPrompt } from "@/lib/dispatch/buildPrompt";
 import { useCloudStore, effectiveDispatchTarget } from "@/store/cloudSlice";
+import { useNotificationsStore } from "@/store/notificationsSlice";
 import { cloudDispatchViaWebSocket } from "@/lib/dispatch/cloudDispatch";
 
 const TEMPUS_API_URL = (process.env.EXPO_PUBLIC_TEMPUS_API_URL || "").replace(/\/$/, "");
@@ -75,6 +76,9 @@ export interface DispatchArgs {
    *  stream is in flight. Cleared on completion (success or error). Optional
    *  to keep older callers working. */
   noteId?: string;
+  /** Note title for push-notification body. Sent to both Mac and Cloud
+   *  routes so they can address the "your note ran" push correctly. */
+  noteTitle?: string;
   /** Called for every SSE frame parsed off the wire. */
   onEvent: (event: DispatchEvent) => void;
   /** Abort signal — passed straight through to expo/fetch. */
@@ -108,6 +112,7 @@ export function useDispatch(): UseDispatchResult {
   const defaultRepo = useCloudStore((s) => s.defaultRepo);
   const defaultRef = useCloudStore((s) => s.defaultRef);
 
+  const pushToken = useNotificationsStore((s) => s.token);
   const target = effectiveDispatchTarget(
     { dispatchMode, anthropicConnected, githubConnected, defaultRepo, defaultRef } as never,
     { macPaired: resolved.isReady },
@@ -140,6 +145,8 @@ export function useDispatch(): UseDispatchResult {
             repo: explicitRepo,
             sessionId: args.sessionId,
             noteId: args.noteId,
+            noteTitle: args.noteTitle,
+            pushToken,
             getToken,
             onEvent: args.onEvent,
             signal: controller.signal,
@@ -214,6 +221,12 @@ export function useDispatch(): UseDispatchResult {
           prompt: built.prompt,
           cwd: args.cwd ?? daemonCwd ?? undefined,
           sessionId: args.sessionId,
+          // Push notification context. The Mac daemon fires an Expo
+          // push to this token when claude exits so the user knows the
+          // run is done without keeping the app open.
+          pushToken: pushToken || undefined,
+          noteId: args.noteId,
+          noteTitle: args.noteTitle,
         }),
         signal: controller.signal,
       });

@@ -553,6 +553,7 @@ export default function HomeScreen() {
       // noteId publishes "this note is running" to the dispatchSlice so the
       // inbox renders a running pip on the matching card.
       noteId: resolvedNoteId || undefined,
+      noteTitle: title.trim() || body.trim().split("\n")[0]?.slice(0, 60) || "Untitled note",
       onEvent: (e: DispatchEvent) => {
         if (e.type === "text") {
           accumulated += e.text;
