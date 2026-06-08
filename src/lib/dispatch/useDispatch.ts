@@ -112,14 +112,19 @@ export function useDispatch(): UseDispatchResult {
     { dispatchMode, anthropicConnected, githubConnected, defaultRepo, defaultRef } as never,
     { macPaired: resolved.isReady },
   );
-  const isCloudConfigured = anthropicConnected && githubConnected && defaultRepo.length > 0;
+  // Cloud is "configured" when both connections exist; the repo is
+  // resolved server-side per dispatch so it doesn't gate readiness.
+  const isCloudConfigured = anthropicConnected && githubConnected;
   const isConfigured = target === "cloud" ? isCloudConfigured && Boolean(TEMPUS_API_URL) : resolved.isReady;
 
   const dispatch = useCallback(async (args: DispatchArgs) => {
     if (target === "cloud") {
-      // WebSocket path = real streaming. Falls back to the HTTP
-      // BUFFERED path automatically when EXPO_PUBLIC_TEMPUS_WS_URL is
-      // unset (older builds, dev without WS configured).
+      // WebSocket path = real streaming. Repo is resolved server-side
+      // from the note content against the user's GitHub-App-accessible
+      // repos; the phone sends only the prompt unless a caller has
+      // explicitly pinned a repo via args.cwd (treated as "owner/name"
+      // when in cloud mode for compatibility).
+      const explicitRepo = args.cwd && args.cwd.includes("/") ? args.cwd : undefined;
       if (TEMPUS_WS_URL) {
         const controller = new AbortController();
         abortRef.current = controller;
@@ -132,8 +137,7 @@ export function useDispatch(): UseDispatchResult {
         try {
           await cloudDispatchViaWebSocket({
             prompt: args.prompt,
-            repo: defaultRepo,
-            ref: defaultRef,
+            repo: explicitRepo,
             sessionId: args.sessionId,
             noteId: args.noteId,
             getToken,
@@ -148,8 +152,8 @@ export function useDispatch(): UseDispatchResult {
         return;
       }
       return dispatchCloud(args, {
-        repo: defaultRepo,
-        ref: defaultRef,
+        repo: explicitRepo ?? "",
+        ref: "main",
         getToken,
         abortRef,
         setRunning,
@@ -290,10 +294,13 @@ async function dispatchCloud(
     args.onEvent({ type: "done" });
     return;
   }
+  // The HTTP-fallback path still requires a repo because the legacy
+  // /v1/cloud-dispatch endpoint doesn't do server-side resolution yet.
+  // The WS path above handles auto-routing.
   if (!ctx.repo) {
     args.onEvent({
       type: "error",
-      message: "No default repo set for cloud dispatches. Open Settings → Cloud → Default repo.",
+      message: "Cloud streaming URL missing — set EXPO_PUBLIC_TEMPUS_WS_URL for repo auto-resolve.",
     });
     args.onEvent({ type: "done" });
     return;

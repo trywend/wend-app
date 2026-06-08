@@ -17,8 +17,11 @@ const WS_URL = (process.env.EXPO_PUBLIC_TEMPUS_WS_URL || "").replace(/\/$/, "");
 
 export interface CloudDispatchArgs {
   prompt: string;
-  repo: string;
-  ref: string;
+  /** Optional explicit repo pin (e.g. set via long-press send). When
+   *  omitted, the backend resolves the repo from the note content
+   *  against the user's GitHub-App-accessible repos. */
+  repo?: string;
+  ref?: string;
   sessionId?: string;
   noteId?: string;
   getToken: () => Promise<string | null>;
@@ -72,8 +75,8 @@ export async function cloudDispatchViaWebSocket(args: CloudDispatchArgs): Promis
       ws.send(JSON.stringify({
         action: "dispatch",
         prompt: args.prompt,
-        repo: args.repo,
-        ref: args.ref,
+        repo: args.repo || undefined,
+        ref: args.ref || undefined,
         sessionId: args.sessionId,
         noteId: args.noteId,
       }));

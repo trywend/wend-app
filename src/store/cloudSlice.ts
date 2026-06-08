@@ -87,7 +87,7 @@ export const useCloudStore = create<CloudState>()(
 );
 
 export function isCloudReady(s: CloudState): boolean {
-  return s.anthropicConnected && s.githubConnected && s.defaultRepo.length > 0;
+  return s.anthropicConnected && s.githubConnected;
 }
 
 /** What the next dispatch should actually use given the mode + connection
