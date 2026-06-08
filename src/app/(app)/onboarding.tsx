@@ -23,25 +23,35 @@ import Animated, {
   FadeIn,
   FadeInDown,
 } from "react-native-reanimated";
-import { LaptopIcon, QrCodeIcon } from "phosphor-react-native";
+import { CloudIcon, LaptopIcon, QrCodeIcon } from "phosphor-react-native";
 
 import { Text } from "@/components/primitives";
 import { WendMark } from "@/components/primitives/Logo";
 import { useTheme } from "@/theme/ThemeProvider";
 import { useDaemonStore } from "@/store/daemonSlice";
 import { useOnboardingStore } from "@/store/onboardingSlice";
+import { useCloudStore } from "@/store/cloudSlice";
 import { ConnectMacSheet } from "@/components/ConnectMacSheet";
+import { ConnectAnthropicSheet } from "@/components/ConnectAnthropicSheet";
+import { CloudGitHubSheet } from "@/components/CloudGitHubSheet";
 
 export default function OnboardingScreen() {
   const router = useRouter();
   const { tokens } = useTheme();
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [macSheetOpen, setMacSheetOpen] = useState(false);
+  const [anthropicSheetOpen, setAnthropicSheetOpen] = useState(false);
+  const [githubSheetOpen, setGithubSheetOpen] = useState(false);
 
   const deviceId = useDaemonStore((s) => s.deviceId);
   const token = useDaemonStore((s) => s.token);
   const host = useDaemonStore((s) => s.host);
   const skipPairing = useOnboardingStore((s) => s.skipPairing);
   const markFirstShown = useOnboardingStore((s) => s.markFirstShown);
+
+  const setDispatchMode = useCloudStore((s) => s.setDispatchMode);
+  const anthropicConnected = useCloudStore((s) => s.anthropicConnected);
+  const githubConnected = useCloudStore((s) => s.githubConnected);
+  const cloudReady = anthropicConnected && githubConnected;
 
   const paired = Boolean(deviceId && token);
 
@@ -53,10 +63,29 @@ export default function OnboardingScreen() {
   // success state a beat before we leave.
   useEffect(() => {
     if (paired) {
+      setDispatchMode("mac");
       const t = setTimeout(() => router.replace("/(app)"), 800);
       return () => clearTimeout(t);
     }
-  }, [paired, router]);
+  }, [paired, router, setDispatchMode]);
+
+  // Auto-route when both cloud connections finish, same beat as Mac.
+  useEffect(() => {
+    if (!cloudReady) return;
+    setDispatchMode("cloud");
+    const t = setTimeout(() => router.replace("/(app)"), 600);
+    return () => clearTimeout(t);
+  }, [cloudReady, router, setDispatchMode]);
+
+  function startMac() {
+    setDispatchMode("mac");
+    setMacSheetOpen(true);
+  }
+
+  function startCloud() {
+    setDispatchMode("cloud");
+    setAnthropicSheetOpen(true);
+  }
 
   function handleSkip() {
     skipPairing();
@@ -192,13 +221,13 @@ export default function OnboardingScreen() {
         </Animated.View>
       </View>
 
-      {/* Bottom: CTAs */}
+      {/* Bottom: dual-route CTAs */}
       <Animated.View
         entering={FadeInDown.delay(220).duration(300)}
         style={{ marginTop: 24 }}
       >
         <Pressable
-          onPress={() => setSheetOpen(true)}
+          onPress={startMac}
           accessibilityRole="button"
           accessibilityLabel="Connect your Mac"
           disabled={paired}
@@ -232,6 +261,43 @@ export default function OnboardingScreen() {
               }}
             >
               {paired ? "Done" : "Connect your Mac"}
+            </Text>
+          </View>
+        </Pressable>
+
+        <Pressable
+          onPress={startCloud}
+          accessibilityRole="button"
+          accessibilityLabel="Use cloud agents instead"
+          disabled={paired}
+          style={({ pressed }) => ({
+            marginTop: 12,
+            opacity: paired ? 0 : pressed ? 0.85 : 1,
+          })}
+        >
+          <View
+            style={{
+              height: 56,
+              borderRadius: 14,
+              backgroundColor: elev,
+              borderWidth: 1,
+              borderColor: border,
+              alignItems: "center",
+              justifyContent: "center",
+              flexDirection: "row",
+              gap: 10,
+            }}
+          >
+            <CloudIcon size={20} color={ink} weight="regular" />
+            <Text
+              style={{
+                fontFamily: "Inter-SemiBold",
+                fontSize: 16,
+                color: ink,
+                letterSpacing: -0.1,
+              }}
+            >
+              Use cloud agents
             </Text>
           </View>
         </Pressable>
@@ -273,8 +339,21 @@ export default function OnboardingScreen() {
       </Animated.View>
 
       <ConnectMacSheet
-        open={sheetOpen}
-        onClose={() => setSheetOpen(false)}
+        open={macSheetOpen}
+        onClose={() => setMacSheetOpen(false)}
+      />
+      <ConnectAnthropicSheet
+        open={anthropicSheetOpen}
+        onClose={() => {
+          setAnthropicSheetOpen(false);
+          if (anthropicConnected && !githubConnected) {
+            setTimeout(() => setGithubSheetOpen(true), 200);
+          }
+        }}
+      />
+      <CloudGitHubSheet
+        open={githubSheetOpen}
+        onClose={() => setGithubSheetOpen(false)}
       />
     </View>
   );

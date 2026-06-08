@@ -16,7 +16,14 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+export type DispatchMode = "mac" | "cloud";
+
 export interface CloudState {
+  /** Where a Send should route by default. The mode is user-chosen in
+   *  onboarding and toggleable later in Settings. Picking "mac" with no
+   *  paired daemon will silently fall through to cloud when cloud is
+   *  configured (Anthropic + GitHub both set). No other auto-fallback. */
+  dispatchMode: DispatchMode;
   anthropicConnected: boolean;
   githubConnected: boolean;
   githubLogin: string | null;
@@ -25,6 +32,7 @@ export interface CloudState {
   defaultRef: string;
   lastSyncedAt: number | null;
 
+  setDispatchMode(mode: DispatchMode): void;
   setAnthropic(connected: boolean): void;
   setGithub(args: {
     installed: boolean;
@@ -38,6 +46,7 @@ export interface CloudState {
 export const useCloudStore = create<CloudState>()(
   persist(
     (set) => ({
+      dispatchMode: "mac",
       anthropicConnected: false,
       githubConnected: false,
       githubLogin: null,
@@ -46,6 +55,7 @@ export const useCloudStore = create<CloudState>()(
       defaultRef: "main",
       lastSyncedAt: null,
 
+      setDispatchMode: (mode) => set({ dispatchMode: mode }),
       setAnthropic: (connected) =>
         set({ anthropicConnected: connected, lastSyncedAt: Date.now() }),
       setGithub: ({ installed, login, installationId }) =>
@@ -59,6 +69,7 @@ export const useCloudStore = create<CloudState>()(
         set((s) => ({ defaultRepo: repo, defaultRef: ref ?? s.defaultRef })),
       reset: () =>
         set({
+          dispatchMode: "mac",
           anthropicConnected: false,
           githubConnected: false,
           githubLogin: null,
@@ -77,4 +88,17 @@ export const useCloudStore = create<CloudState>()(
 
 export function isCloudReady(s: CloudState): boolean {
   return s.anthropicConnected && s.githubConnected && s.defaultRepo.length > 0;
+}
+
+/** What the next dispatch should actually use given the mode + connection
+ *  state. Returns "cloud" when mode is cloud OR mode is mac with no Mac
+ *  paired and cloud fully configured. Returns "mac" otherwise.
+ *  Callers handle the "neither configured" case at the call site. */
+export function effectiveDispatchTarget(
+  s: CloudState,
+  args: { macPaired: boolean },
+): DispatchMode {
+  if (s.dispatchMode === "cloud") return "cloud";
+  if (!args.macPaired && isCloudReady(s)) return "cloud";
+  return "mac";
 }

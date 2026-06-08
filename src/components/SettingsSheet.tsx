@@ -98,6 +98,8 @@ function SettingsSheetMounted({
   const anthropicConnected = useCloudStore((s) => s.anthropicConnected);
   const cloudGithubConnected = useCloudStore((s) => s.githubConnected);
   const cloudGithubLogin = useCloudStore((s) => s.githubLogin);
+  const dispatchMode = useCloudStore((s) => s.dispatchMode);
+  const setDispatchMode = useCloudStore((s) => s.setDispatchMode);
   // Android hardware back: close this sheet rather than exiting the app.
   // See src/lib/useAndroidBack.ts — listener is LIFO so stacked sheets
   // (e.g. IntegrationsSheet over this one) win first.
@@ -514,6 +516,81 @@ function SettingsSheetMounted({
           {(onConnectAnthropic || onConnectCloudGitHub) ? (
             <Section title="Cloud" subtleColor={subtleColor}>
               <SectionCard cardBg={cardBg} borderColor={borderColor}>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    paddingHorizontal: 14,
+                    paddingVertical: 12,
+                    gap: 12,
+                  }}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={{
+                        fontFamily: "Inter-SemiBold",
+                        fontSize: 15,
+                        color: inkColor,
+                      }}
+                    >
+                      Dispatch mode
+                    </Text>
+                    <Text
+                      style={{
+                        marginTop: 2,
+                        fontFamily: "Inter-Regular",
+                        fontSize: 12,
+                        color: subtleColor,
+                      }}
+                    >
+                      {dispatchMode === "mac"
+                        ? "Sends route to your paired Mac"
+                        : "Sends spin up ephemeral cloud agents"}
+                    </Text>
+                  </View>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      borderWidth: 1,
+                      borderColor: borderColor,
+                      borderRadius: 8,
+                      overflow: "hidden",
+                    }}
+                  >
+                    {(["mac", "cloud"] as const).map((m) => {
+                      const active = dispatchMode === m;
+                      return (
+                        <Pressable
+                          key={m}
+                          onPress={() => setDispatchMode(m)}
+                          accessibilityLabel={`Set dispatch mode to ${m}`}
+                          android_ripple={{ color: "rgba(0,0,0,0.08)" }}
+                        >
+                          <View
+                            style={{
+                              paddingHorizontal: 12,
+                              paddingVertical: 6,
+                              backgroundColor: active ? accent : "transparent",
+                            }}
+                          >
+                            <Text
+                              style={{
+                                fontFamily: "Inter-SemiBold",
+                                fontSize: 12,
+                                letterSpacing: 0.3,
+                                color: active ? accentOn : subtleColor,
+                                textTransform: "uppercase",
+                              }}
+                            >
+                              {m}
+                            </Text>
+                          </View>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+                <Divider color={borderColor} />
                 {onConnectAnthropic ? (
                   <Row
                     Icon={SparkleIcon}
