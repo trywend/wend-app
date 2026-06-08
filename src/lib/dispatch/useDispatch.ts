@@ -35,8 +35,10 @@ import { useDaemonStore } from "@/store/daemonSlice";
 import { useResolvedDaemonURL } from "@/lib/dispatch/useResolvedDaemonURL";
 import { buildPrompt } from "@/lib/dispatch/buildPrompt";
 import { useCloudStore, effectiveDispatchTarget } from "@/store/cloudSlice";
+import { cloudDispatchViaWebSocket } from "@/lib/dispatch/cloudDispatch";
 
 const TEMPUS_API_URL = (process.env.EXPO_PUBLIC_TEMPUS_API_URL || "").replace(/\/$/, "");
+const TEMPUS_WS_URL = (process.env.EXPO_PUBLIC_TEMPUS_WS_URL || "").replace(/\/$/, "");
 
 export type DispatchEvent =
   | { type: "text"; text: string }
@@ -115,6 +117,36 @@ export function useDispatch(): UseDispatchResult {
 
   const dispatch = useCallback(async (args: DispatchArgs) => {
     if (target === "cloud") {
+      // WebSocket path = real streaming. Falls back to the HTTP
+      // BUFFERED path automatically when EXPO_PUBLIC_TEMPUS_WS_URL is
+      // unset (older builds, dev without WS configured).
+      if (TEMPUS_WS_URL) {
+        const controller = new AbortController();
+        abortRef.current = controller;
+        if (args.signal) {
+          if (args.signal.aborted) controller.abort();
+          else args.signal.addEventListener("abort", () => controller.abort());
+        }
+        setRunning(true);
+        useDispatchStore.getState().setRunningNoteId(args.noteId ?? null);
+        try {
+          await cloudDispatchViaWebSocket({
+            prompt: args.prompt,
+            repo: defaultRepo,
+            ref: defaultRef,
+            sessionId: args.sessionId,
+            noteId: args.noteId,
+            getToken,
+            onEvent: args.onEvent,
+            signal: controller.signal,
+          });
+        } finally {
+          setRunning(false);
+          useDispatchStore.getState().setRunningNoteId(null);
+          if (abortRef.current === controller) abortRef.current = null;
+        }
+        return;
+      }
       return dispatchCloud(args, {
         repo: defaultRepo,
         ref: defaultRef,
