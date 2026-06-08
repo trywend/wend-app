@@ -23,9 +23,6 @@ export interface CloudState {
    *  toggleable in Settings. No auto-fallback. */
   dispatchMode: DispatchMode;
   anthropicConnected: boolean;
-  /** Claude OAuth via the Mac's Keychain is the subscription-billed
-   *  alternative to an Anthropic API key. Prefer this when set. */
-  claudeConnected: boolean;
   githubConnected: boolean;
   githubLogin: string | null;
   githubInstallationId: number | null;
@@ -35,7 +32,6 @@ export interface CloudState {
 
   setDispatchMode(mode: DispatchMode): void;
   setAnthropic(connected: boolean): void;
-  setClaude(connected: boolean): void;
   setGithub(args: {
     installed: boolean;
     login: string | null;
@@ -50,7 +46,6 @@ export const useCloudStore = create<CloudState>()(
     (set) => ({
       dispatchMode: "mac",
       anthropicConnected: false,
-      claudeConnected: false,
       githubConnected: false,
       githubLogin: null,
       githubInstallationId: null,
@@ -61,8 +56,6 @@ export const useCloudStore = create<CloudState>()(
       setDispatchMode: (mode) => set({ dispatchMode: mode }),
       setAnthropic: (connected) =>
         set({ anthropicConnected: connected, lastSyncedAt: Date.now() }),
-      setClaude: (connected) =>
-        set({ claudeConnected: connected, lastSyncedAt: Date.now() }),
       setGithub: ({ installed, login, installationId }) =>
         set({
           githubConnected: installed,
@@ -76,7 +69,6 @@ export const useCloudStore = create<CloudState>()(
         set({
           dispatchMode: "mac",
           anthropicConnected: false,
-          claudeConnected: false,
           githubConnected: false,
           githubLogin: null,
           githubInstallationId: null,
@@ -93,7 +85,7 @@ export const useCloudStore = create<CloudState>()(
 );
 
 export function isCloudReady(s: CloudState): boolean {
-  return (s.anthropicConnected || s.claudeConnected) && s.githubConnected;
+  return s.anthropicConnected && s.githubConnected;
 }
 
 /** Returns the user's chosen dispatch mode verbatim. No auto-fallback.
