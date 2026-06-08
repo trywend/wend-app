@@ -90,6 +90,9 @@ type ExpoNotificationsModule = {
   addNotificationReceivedListener: (
     cb: (n: { request: { content: { title?: string; body?: string; data?: unknown } } }) => void,
   ) => { remove: () => void };
+  addNotificationResponseReceivedListener: (
+    cb: (r: { notification: { request: { content: { data?: Record<string, unknown> } } } }) => void,
+  ) => { remove: () => void };
 };
 
 /** Lazy-load expo-notifications. Returns null when the module isn't
@@ -106,6 +109,15 @@ function loadExpoNotifications(): ExpoNotificationsModule | null {
 
 let foregroundHandlerInstalled = false;
 let receivedSubscription: { remove: () => void } | null = null;
+let responseSubscription: { remove: () => void } | null = null;
+
+/** Callback the app registers so a tapped notification can deep-link
+ *  into the right note. Set once at app boot from the root layout. */
+let onResponseDeepLink: ((noteId: string) => void) | null = null;
+
+export function setNotificationResponseHandler(handler: (noteId: string) => void) {
+  onResponseDeepLink = handler;
+}
 
 /** Install the foreground notification presentation policy + a listener
  *  that logs (and could later toast). Idempotent. */
@@ -131,6 +143,28 @@ function installForegroundHandler(N: ExpoNotificationsModule) {
     // founder can verify e2e from a debug build.
     console.log("[wend.push] received in-app:", title, "—", body);
   });
+
+  // Tap-to-deep-link: when the user opens a push notification, route to
+  // the note that completed. The notification carries data.noteId set
+  // by whichever route fired the push (Mac daemon or cloud container).
+  responseSubscription = N.addNotificationResponseReceivedListener((resp) => {
+    const data = resp.notification.request.content.data ?? {};
+    const noteId = typeof data.noteId === "string" ? data.noteId : "";
+    if (!noteId) return;
+    if (onResponseDeepLink) {
+      onResponseDeepLink(noteId);
+    } else {
+      // App not yet wired; stash for the layout effect to pick up.
+      pendingDeepLink = noteId;
+    }
+  });
+}
+
+let pendingDeepLink: string | null = null;
+export function consumePendingDeepLink(): string | null {
+  const v = pendingDeepLink;
+  pendingDeepLink = null;
+  return v;
 }
 
 /** Configure an Android notification channel. Required for visible
@@ -274,6 +308,10 @@ export function disposePushNotifications() {
   if (receivedSubscription) {
     receivedSubscription.remove();
     receivedSubscription = null;
+  }
+  if (responseSubscription) {
+    responseSubscription.remove();
+    responseSubscription = null;
   }
   foregroundHandlerInstalled = false;
 }

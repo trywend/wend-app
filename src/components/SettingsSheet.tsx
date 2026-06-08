@@ -74,6 +74,8 @@ export interface SettingsSheetProps {
   onConnectAnthropic?: () => void;
   /** Opens the cloud-agent GitHub App install sheet. */
   onConnectCloudGitHub?: () => void;
+  /** Opens the Claude OAuth via Mac connect sheet. */
+  onConnectClaude?: () => void;
   /** Optional handler for not-yet-built destinations (Profile, Subscription).
    *  The parent renders a toast / no-op. */
   onShowComingSoon?: (label: string) => void;
@@ -93,9 +95,11 @@ function SettingsSheetMounted({
   onConnectMac,
   onConnectAnthropic,
   onConnectCloudGitHub,
+  onConnectClaude,
   onShowComingSoon,
 }: SettingsSheetProps) {
   const anthropicConnected = useCloudStore((s) => s.anthropicConnected);
+  const claudeConnected = useCloudStore((s) => s.claudeConnected);
   const cloudGithubConnected = useCloudStore((s) => s.githubConnected);
   const cloudGithubLogin = useCloudStore((s) => s.githubLogin);
   const dispatchMode = useCloudStore((s) => s.dispatchMode);
@@ -591,14 +595,39 @@ function SettingsSheetMounted({
                   </View>
                 </View>
                 <Divider color={borderColor} />
+                {onConnectClaude ? (
+                  <Row
+                    Icon={SparkleIcon}
+                    label="Claude subscription"
+                    subtitle={
+                      claudeConnected
+                        ? "Bills your Claude subscription via your Mac's auth"
+                        : "Recommended · uses your Claude plan instead of API tokens"
+                    }
+                    inkColor={inkColor}
+                    subtleColor={subtleColor}
+                    tertiaryColor={tertiaryColor}
+                    onPress={onConnectClaude}
+                    trailing={
+                      claudeConnected ? (
+                        <StatusPip label="Set" color={tokens["status-done"]} />
+                      ) : (
+                        <SmallButtonText label="Connect" color={accent} />
+                      )
+                    }
+                  />
+                ) : null}
+                {onConnectClaude && onConnectAnthropic ? (
+                  <Divider color={borderColor} />
+                ) : null}
                 {onConnectAnthropic ? (
                   <Row
                     Icon={SparkleIcon}
-                    label="Anthropic key"
+                    label="Anthropic API key"
                     subtitle={
                       anthropicConnected
-                        ? "Connected · billed to your Anthropic account"
-                        : "Optional · enables cloud dispatches"
+                        ? "Connected · pay-per-token billing"
+                        : "Alternative · pay-per-token via your API account"
                     }
                     inkColor={inkColor}
                     subtleColor={subtleColor}
@@ -613,7 +642,7 @@ function SettingsSheetMounted({
                     }
                   />
                 ) : null}
-                {onConnectAnthropic && onConnectCloudGitHub ? (
+                {(onConnectAnthropic || onConnectClaude) && onConnectCloudGitHub ? (
                   <Divider color={borderColor} />
                 ) : null}
                 {onConnectCloudGitHub ? (

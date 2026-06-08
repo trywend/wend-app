@@ -19,12 +19,13 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 export type DispatchMode = "mac" | "cloud";
 
 export interface CloudState {
-  /** Where a Send should route by default. The mode is user-chosen in
-   *  onboarding and toggleable later in Settings. Picking "mac" with no
-   *  paired daemon will silently fall through to cloud when cloud is
-   *  configured (Anthropic + GitHub both set). No other auto-fallback. */
+  /** Where a Send should route. User-chosen in onboarding and
+   *  toggleable in Settings. No auto-fallback. */
   dispatchMode: DispatchMode;
   anthropicConnected: boolean;
+  /** Claude OAuth via the Mac's Keychain is the subscription-billed
+   *  alternative to an Anthropic API key. Prefer this when set. */
+  claudeConnected: boolean;
   githubConnected: boolean;
   githubLogin: string | null;
   githubInstallationId: number | null;
@@ -34,6 +35,7 @@ export interface CloudState {
 
   setDispatchMode(mode: DispatchMode): void;
   setAnthropic(connected: boolean): void;
+  setClaude(connected: boolean): void;
   setGithub(args: {
     installed: boolean;
     login: string | null;
@@ -48,6 +50,7 @@ export const useCloudStore = create<CloudState>()(
     (set) => ({
       dispatchMode: "mac",
       anthropicConnected: false,
+      claudeConnected: false,
       githubConnected: false,
       githubLogin: null,
       githubInstallationId: null,
@@ -58,6 +61,8 @@ export const useCloudStore = create<CloudState>()(
       setDispatchMode: (mode) => set({ dispatchMode: mode }),
       setAnthropic: (connected) =>
         set({ anthropicConnected: connected, lastSyncedAt: Date.now() }),
+      setClaude: (connected) =>
+        set({ claudeConnected: connected, lastSyncedAt: Date.now() }),
       setGithub: ({ installed, login, installationId }) =>
         set({
           githubConnected: installed,
@@ -71,6 +76,7 @@ export const useCloudStore = create<CloudState>()(
         set({
           dispatchMode: "mac",
           anthropicConnected: false,
+          claudeConnected: false,
           githubConnected: false,
           githubLogin: null,
           githubInstallationId: null,
@@ -87,18 +93,17 @@ export const useCloudStore = create<CloudState>()(
 );
 
 export function isCloudReady(s: CloudState): boolean {
-  return s.anthropicConnected && s.githubConnected;
+  return (s.anthropicConnected || s.claudeConnected) && s.githubConnected;
 }
 
-/** What the next dispatch should actually use given the mode + connection
- *  state. Returns "cloud" when mode is cloud OR mode is mac with no Mac
- *  paired and cloud fully configured. Returns "mac" otherwise.
- *  Callers handle the "neither configured" case at the call site. */
+/** Returns the user's chosen dispatch mode verbatim. No auto-fallback.
+ *  The user explicitly toggled between Mac and Cloud in Settings (or
+ *  in onboarding); we honor that choice and let the dispatcher's
+ *  readiness check surface a clear error if their picked target isn't
+ *  configured. */
 export function effectiveDispatchTarget(
   s: CloudState,
-  args: { macPaired: boolean },
+  _args: { macPaired: boolean },
 ): DispatchMode {
-  if (s.dispatchMode === "cloud") return "cloud";
-  if (!args.macPaired && isCloudReady(s)) return "cloud";
-  return "mac";
+  return s.dispatchMode;
 }

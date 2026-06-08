@@ -94,6 +94,9 @@ import { useAuthStore } from "@/store/authSlice";
 import { useDaemonStore } from "@/store/daemonSlice";
 import { useOnboardingStore } from "@/store/onboardingSlice";
 import { useCloudStore } from "@/store/cloudSlice";
+import { setNotificationResponseHandler, consumePendingDeepLink } from "@/lib/notifications";
+import { catchUpRunsForNote } from "@/lib/dispatch/catchUp";
+import { useWendCloudApi } from "@/lib/wend-cloud-api";
 import { useSignOut } from "@/auth/client";
 import { Text } from "@/components/primitives";
 import { WendWordmark } from "@/components/primitives/Logo";
@@ -104,6 +107,7 @@ import { IntegrationsSheet } from "@/components/IntegrationsSheet";
 import { ConnectGitHubSheet } from "@/components/ConnectGitHubSheet";
 import { ConnectMacSheet } from "@/components/ConnectMacSheet";
 import { ConnectAnthropicSheet } from "@/components/ConnectAnthropicSheet";
+import { ConnectClaudeSheet } from "@/components/ConnectClaudeSheet";
 import { CloudGitHubSheet } from "@/components/CloudGitHubSheet";
 import { CloudRepoPickerSheet } from "@/components/CloudRepoPickerSheet";
 import { NoteActionsSheet } from "@/components/NoteActionsSheet";
@@ -175,9 +179,38 @@ export default function HomeScreen() {
   const [connectGitHubOpen, setConnectGitHubOpen] = useState(false);
   const [connectMacOpen, setConnectMacOpen] = useState(false);
   const [connectAnthropicOpen, setConnectAnthropicOpen] = useState(false);
+  const [connectClaudeOpen, setConnectClaudeOpen] = useState(false);
   const [cloudGitHubOpen, setCloudGitHubOpen] = useState(false);
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
   const dispatchMode = useCloudStore((s) => s.dispatchMode);
+
+  /* ─── Deep-link: tap on a push notification opens the right note ──── */
+  useEffect(() => {
+    setNotificationResponseHandler((noteId) => {
+      setCurrentNoteId(noteId);
+      setInflight(null);
+      setChipDismissed(false);
+    });
+    const pending = consumePendingDeepLink();
+    if (pending) {
+      setCurrentNoteId(pending);
+      setInflight(null);
+    }
+  }, []);
+
+  /* ─── Catch up cloud runs that completed while we were offline ───── */
+  const cloudApi = useWendCloudApi();
+  useEffect(() => {
+    if (!resolvedNoteId || !cloudApi.isConfigured) return;
+    void catchUpRunsForNote({ noteId: resolvedNoteId, api: cloudApi })
+      .then((added) => {
+        if (added > 0) {
+          // notes-storage was updated directly; bump the cache so
+          // useNoteEditor / useNotesList re-read.
+          void refreshNotes();
+        }
+      });
+  }, [resolvedNoteId, cloudApi.isConfigured, refreshNotes]);
   const [noteActions, setNoteActions] = useState<{
     id: string;
     title: string;
@@ -1572,6 +1605,7 @@ export default function HomeScreen() {
           setConnectMacOpen(true);
         }}
         onConnectAnthropic={() => setConnectAnthropicOpen(true)}
+        onConnectClaude={() => setConnectClaudeOpen(true)}
         onConnectCloudGitHub={() => setCloudGitHubOpen(true)}
         onShowComingSoon={(label) => {
           // Lightweight feedback for non-functional rows (Profile, Subscription).
@@ -1582,6 +1616,10 @@ export default function HomeScreen() {
       <ConnectAnthropicSheet
         open={connectAnthropicOpen}
         onClose={() => setConnectAnthropicOpen(false)}
+      />
+      <ConnectClaudeSheet
+        open={connectClaudeOpen}
+        onClose={() => setConnectClaudeOpen(false)}
       />
       <CloudGitHubSheet
         open={cloudGitHubOpen}

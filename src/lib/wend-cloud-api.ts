@@ -119,6 +119,41 @@ export function useWendCloudApi() {
         }>;
       }>("/v1/connect/github/repos");
     },
+
+    connectClaude(credentialsJson: string) {
+      return authed<{ ok: boolean }>("/v1/connect/claude", {
+        method: "POST",
+        body: { credentials_json: credentialsJson },
+      });
+    },
+
+    disconnectClaude() {
+      return authed<{ ok: boolean }>("/v1/connect/claude", { method: "DELETE" });
+    },
+
+    claudeStatus() {
+      return authed<{ connected: boolean }>("/v1/connect/claude/status");
+    },
+
+    listRunsForNote(noteId: string, since?: number) {
+      const qs = new URLSearchParams({ noteId });
+      if (since !== undefined) qs.set("since", String(since));
+      return authed<{
+        runs: Array<{
+          runId: string;
+          noteId: string;
+          createdAt: number;
+          response: string;
+          sessionId: string;
+          status: "done" | "error";
+          durationMs: number;
+          costUsd: number;
+          toolUses: string[];
+          repo: string;
+          agentId: string;
+        }>;
+      }>(`/v1/runs?${qs.toString()}`);
+    },
   };
 }
 
