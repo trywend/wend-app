@@ -8,7 +8,8 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_Z3Jvd24tbW90aC00NC5jbGVyay5hY2NvdW50cy5kZXYk"
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_Z3Jvd24tbW90aC00NC5jbGVyay5hY2NvdW50cy5kZXYk",
+        "EXPO_PUBLIC_TEMPUS_API_URL": "https://yelxtrxht5.execute-api.us-east-1.amazonaws.com"
       },
       "android": {
         "buildType": "apk",
@@ -29,7 +30,8 @@
       "distribution": "internal",
       "channel": "preview",
       "env": {
-        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_Z3Jvd24tbW90aC00NC5jbGVyay5hY2NvdW50cy5kZXYk"
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_Z3Jvd24tbW90aC00NC5jbGVyay5hY2NvdW50cy5kZXYk",
+        "EXPO_PUBLIC_TEMPUS_API_URL": "https://yelxtrxht5.execute-api.us-east-1.amazonaws.com"
       },
       "android": {
         "buildType": "apk"
@@ -48,7 +50,8 @@
     "production": {
       "channel": "production",
       "env": {
-        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_Z3Jvd24tbW90aC00NC5jbGVyay5hY2NvdW50cy5kZXYk"
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_Z3Jvd24tbW90aC00NC5jbGVyay5hY2NvdW50cy5kZXYk",
+        "EXPO_PUBLIC_TEMPUS_API_URL": "https://yelxtrxht5.execute-api.us-east-1.amazonaws.com"
       },
       "android": {
         "buildType": "app-bundle"

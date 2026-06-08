@@ -40,6 +40,7 @@ import {
   LaptopIcon,
   MoonStarsIcon,
   SignOutIcon,
+  SparkleIcon,
   UserIcon,
   XIcon,
   type Icon as PhosphorIcon,
@@ -52,6 +53,7 @@ import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
 import { useUiStore, type ThemePreference } from "@/store/uiSlice";
 import { useDaemonStore } from "@/store/daemonSlice";
+import { useCloudStore } from "@/store/cloudSlice";
 import { useAndroidBack } from "@/lib/useAndroidBack";
 
 /** Rendezvous backend that hosts the Linear OAuth routes. Kept inline
@@ -68,6 +70,10 @@ export interface SettingsSheetProps {
   onOpenIntegrations: () => void;
   /** Opens the camera-based QR scanner for pairing with Wend.app on a Mac. */
   onConnectMac: () => void;
+  /** Opens the cloud-agent Anthropic key sheet. */
+  onConnectAnthropic?: () => void;
+  /** Opens the cloud-agent GitHub App install sheet. */
+  onConnectCloudGitHub?: () => void;
   /** Optional handler for not-yet-built destinations (Profile, Subscription).
    *  The parent renders a toast / no-op. */
   onShowComingSoon?: (label: string) => void;
@@ -85,8 +91,13 @@ function SettingsSheetMounted({
   onSignOut,
   onOpenIntegrations,
   onConnectMac,
+  onConnectAnthropic,
+  onConnectCloudGitHub,
   onShowComingSoon,
 }: SettingsSheetProps) {
+  const anthropicConnected = useCloudStore((s) => s.anthropicConnected);
+  const cloudGithubConnected = useCloudStore((s) => s.githubConnected);
+  const cloudGithubLogin = useCloudStore((s) => s.githubLogin);
   // Android hardware back: close this sheet rather than exiting the app.
   // See src/lib/useAndroidBack.ts — listener is LIFO so stacked sheets
   // (e.g. IntegrationsSheet over this one) win first.
@@ -495,6 +506,64 @@ function SettingsSheetMounted({
               </View>
             </View>
           </Section>
+
+          {/* -------------------- Cloud (optional) -------------
+              Two opt-in connections that unlock cloud-dispatch as a
+              fallback when no Mac is paired. Both are skippable; the
+              Mac path keeps working without them. */}
+          {(onConnectAnthropic || onConnectCloudGitHub) ? (
+            <Section title="Cloud" subtleColor={subtleColor}>
+              <SectionCard cardBg={cardBg} borderColor={borderColor}>
+                {onConnectAnthropic ? (
+                  <Row
+                    Icon={SparkleIcon}
+                    label="Anthropic key"
+                    subtitle={
+                      anthropicConnected
+                        ? "Connected · billed to your Anthropic account"
+                        : "Optional · enables cloud dispatches"
+                    }
+                    inkColor={inkColor}
+                    subtleColor={subtleColor}
+                    tertiaryColor={tertiaryColor}
+                    onPress={onConnectAnthropic}
+                    trailing={
+                      anthropicConnected ? (
+                        <StatusPip label="Set" color={tokens["status-done"]} />
+                      ) : (
+                        <SmallButtonText label="Connect" color={accent} />
+                      )
+                    }
+                  />
+                ) : null}
+                {onConnectAnthropic && onConnectCloudGitHub ? (
+                  <Divider color={borderColor} />
+                ) : null}
+                {onConnectCloudGitHub ? (
+                  <Row
+                    Icon={GithubLogoIcon}
+                    label="Repo access"
+                    subtitle={
+                      cloudGithubConnected
+                        ? `Wend Cloud installed · ${cloudGithubLogin ? "@" + cloudGithubLogin : "active"}`
+                        : "Optional · install the read-only GitHub App"
+                    }
+                    inkColor={inkColor}
+                    subtleColor={subtleColor}
+                    tertiaryColor={tertiaryColor}
+                    onPress={onConnectCloudGitHub}
+                    trailing={
+                      cloudGithubConnected ? (
+                        <StatusPip label="Set" color={tokens["status-done"]} />
+                      ) : (
+                        <SmallButtonText label="Connect" color={accent} />
+                      )
+                    }
+                  />
+                ) : null}
+              </SectionCard>
+            </Section>
+          ) : null}
 
           {/* -------------------- Preferences ----------------- */}
           <Section title="Preferences" subtleColor={subtleColor}>

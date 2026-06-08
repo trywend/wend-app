@@ -102,6 +102,8 @@ import { SettingsSheet } from "@/components/SettingsSheet";
 import { IntegrationsSheet } from "@/components/IntegrationsSheet";
 import { ConnectGitHubSheet } from "@/components/ConnectGitHubSheet";
 import { ConnectMacSheet } from "@/components/ConnectMacSheet";
+import { ConnectAnthropicSheet } from "@/components/ConnectAnthropicSheet";
+import { CloudGitHubSheet } from "@/components/CloudGitHubSheet";
 import { NoteActionsSheet } from "@/components/NoteActionsSheet";
 import { AttachmentPicker } from "@/components/AttachmentPicker";
 import { FileViewerModal } from "@/components/FileViewerModal";
@@ -170,6 +172,8 @@ export default function HomeScreen() {
   const [integrationsOpen, setIntegrationsOpen] = useState(false);
   const [connectGitHubOpen, setConnectGitHubOpen] = useState(false);
   const [connectMacOpen, setConnectMacOpen] = useState(false);
+  const [connectAnthropicOpen, setConnectAnthropicOpen] = useState(false);
+  const [cloudGitHubOpen, setCloudGitHubOpen] = useState(false);
   const [noteActions, setNoteActions] = useState<{
     id: string;
     title: string;
@@ -1557,11 +1561,21 @@ export default function HomeScreen() {
           // <host>" subtitle updated live.
           setConnectMacOpen(true);
         }}
+        onConnectAnthropic={() => setConnectAnthropicOpen(true)}
+        onConnectCloudGitHub={() => setCloudGitHubOpen(true)}
         onShowComingSoon={(label) => {
           // Lightweight feedback for non-functional rows (Profile, Subscription).
           // Replace with real destinations as they ship.
           Alert.alert(label, `${label} is coming soon.`);
         }}
+      />
+      <ConnectAnthropicSheet
+        open={connectAnthropicOpen}
+        onClose={() => setConnectAnthropicOpen(false)}
+      />
+      <CloudGitHubSheet
+        open={cloudGitHubOpen}
+        onClose={() => setCloudGitHubOpen(false)}
       />
       <IntegrationsSheet
         open={integrationsOpen}
