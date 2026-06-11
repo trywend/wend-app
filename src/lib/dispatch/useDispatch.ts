@@ -36,6 +36,7 @@ import { useResolvedDaemonURL } from "@/lib/dispatch/useResolvedDaemonURL";
 import { buildPrompt } from "@/lib/dispatch/buildPrompt";
 import { useCloudStore, effectiveDispatchTarget } from "@/store/cloudSlice";
 import { useNotificationsStore } from "@/store/notificationsSlice";
+import { useSubscriptionStore, canDispatch } from "@/store/subscriptionSlice";
 import { cloudDispatchViaWebSocket } from "@/lib/dispatch/cloudDispatch";
 import { uploadAttachmentToDaemon } from "@/lib/attachments";
 
@@ -118,6 +119,7 @@ export function useDispatch(): UseDispatchResult {
   const defaultRef = useCloudStore((s) => s.defaultRef);
 
   const pushToken = useNotificationsStore((s) => s.token);
+  const subscription = useSubscriptionStore();
   const target = effectiveDispatchTarget(
     { dispatchMode, anthropicConnected, githubConnected, defaultRepo, defaultRef } as never,
     { macPaired: resolved.isReady },
@@ -128,6 +130,20 @@ export function useDispatch(): UseDispatchResult {
   const isConfigured = target === "cloud" ? isCloudConfigured && Boolean(TEMPUS_API_URL) : resolved.isReady;
 
   const dispatch = useCallback(async (args: DispatchArgs) => {
+    // Subscription gate. The PaywallSheet host listens for `paywall`
+    // events on onEvent and opens itself; if no listener handles it,
+    // the dispatch just no-ops with a clear error event.
+    if (!canDispatch(subscription, { mode: target })) {
+      args.onEvent({
+        type: "error",
+        message: target === "mac"
+          ? "Mac pairing requires Wend Pro. Open Settings → Subscription to upgrade."
+          : "Cloud dispatches require a Wend subscription. Open Settings → Subscription to upgrade.",
+      });
+      args.onEvent({ type: "done" });
+      return;
+    }
+
     if (target === "cloud") {
       // WebSocket path = real streaming. Repo is resolved server-side
       // from the note content against the user's GitHub-App-accessible

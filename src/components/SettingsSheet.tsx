@@ -41,6 +41,7 @@ import {
   MoonStarsIcon,
   SignOutIcon,
   SparkleIcon,
+  StarIcon,
   UserIcon,
   XIcon,
   type Icon as PhosphorIcon,
@@ -54,6 +55,7 @@ import { useTheme } from "@/theme/ThemeProvider";
 import { useUiStore, type ThemePreference } from "@/store/uiSlice";
 import { useDaemonStore } from "@/store/daemonSlice";
 import { useCloudStore } from "@/store/cloudSlice";
+import { useSubscriptionStore } from "@/store/subscriptionSlice";
 import { useAndroidBack } from "@/lib/useAndroidBack";
 
 /** Rendezvous backend that hosts the Linear OAuth routes. Kept inline
@@ -97,6 +99,10 @@ function SettingsSheetMounted({
 }: SettingsSheetProps) {
   const anthropicConnected = useCloudStore((s) => s.anthropicConnected);
   const cloudGithubConnected = useCloudStore((s) => s.githubConnected);
+  const subTier = useSubscriptionStore((s) => s.tier);
+  const subStatus = useSubscriptionStore((s) => s.status);
+  const subUsed = useSubscriptionStore((s) => s.cloudUsedThisMonth);
+  const subQuota = useSubscriptionStore((s) => s.cloudQuotaTotal);
   const cloudGithubLogin = useCloudStore((s) => s.githubLogin);
   const dispatchMode = useCloudStore((s) => s.dispatchMode);
   const setDispatchMode = useCloudStore((s) => s.setDispatchMode);
@@ -507,6 +513,41 @@ function SettingsSheetMounted({
                 />
               </View>
             </View>
+          </Section>
+
+          {/* -------------------- Subscription ----------------- */}
+          <Section title="Subscription" subtleColor={subtleColor}>
+            <SectionCard cardBg={cardBg} borderColor={borderColor}>
+              <Row
+                Icon={StarIcon}
+                label={
+                  subTier === "pro" ? "Wend Pro" :
+                  subTier === "cloud_paygo" ? "Wend Cloud (paygo)" :
+                  "Free"
+                }
+                subtitle={
+                  subTier === "pro" && subStatus === "active"
+                    ? `Mac unlimited · ${subUsed}/${subQuota} cloud this month`
+                    : subTier === "free"
+                      ? "Editor only — upgrade to dispatch"
+                      : `Status: ${subStatus}`
+                }
+                inkColor={inkColor}
+                subtleColor={subtleColor}
+                tertiaryColor={tertiaryColor}
+                onPress={() => onShowComingSoon?.("Billing portal")}
+                trailing={
+                  subTier === "free" ? (
+                    <SmallButtonText label="Upgrade" color={accent} />
+                  ) : (
+                    <StatusPip
+                      label={subStatus === "active" ? "Active" : subStatus}
+                      color={subStatus === "active" ? tokens["status-done"] : tokens["status-warn"]}
+                    />
+                  )
+                }
+              />
+            </SectionCard>
           </Section>
 
           {/* -------------------- Cloud (optional) -------------

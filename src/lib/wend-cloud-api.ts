@@ -120,6 +120,19 @@ export function useWendCloudApi() {
       }>("/v1/connect/github/repos");
     },
 
+    subscriptionStatus() {
+      return authed<{
+        tier: "free" | "pro" | "cloud_paygo";
+        status: "active" | "past_due" | "canceled" | "none";
+        current_period_end: string | null;
+        cloud_used_this_month: number;
+        cloud_quota_total: number;
+        cloud_quota_remaining: number;
+        can_pair_mac: boolean;
+        overage_usd_per_dispatch: number;
+      }>("/v1/subscription/status");
+    },
+
     listRunsForNote(noteId: string, since?: number) {
       const qs = new URLSearchParams({ noteId });
       if (since !== undefined) qs.set("since", String(since));

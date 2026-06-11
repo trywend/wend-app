@@ -97,6 +97,8 @@ import { useCloudStore } from "@/store/cloudSlice";
 import { setNotificationResponseHandler, consumePendingDeepLink } from "@/lib/notifications";
 import { catchUpRunsForNote } from "@/lib/dispatch/catchUp";
 import { useWendCloudApi } from "@/lib/wend-cloud-api";
+import { useSubscriptionSync } from "@/lib/useSubscriptionSync";
+import { PaywallSheet, type PaywallReason } from "@/components/PaywallSheet";
 import { useSignOut } from "@/auth/client";
 import { Text } from "@/components/primitives";
 import { WendWordmark } from "@/components/primitives/Logo";
@@ -180,7 +182,9 @@ export default function HomeScreen() {
   const [connectAnthropicOpen, setConnectAnthropicOpen] = useState(false);
   const [cloudGitHubOpen, setCloudGitHubOpen] = useState(false);
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
+  const [paywall, setPaywall] = useState<PaywallReason | null>(null);
   const dispatchMode = useCloudStore((s) => s.dispatchMode);
+  useSubscriptionSync();
 
   /* ─── Deep-link: tap on a push notification opens the right note ──── */
   useEffect(() => {
@@ -596,6 +600,12 @@ export default function HomeScreen() {
           }))
         : undefined,
       onEvent: (e: DispatchEvent) => {
+        if (e.type === "error" && /Wend Pro|Wend subscription/.test(e.message)) {
+          setPaywall({
+            title: dispatchMode === "mac" ? "Pair your Mac with Pro" : "Dispatch to the cloud",
+            body: e.message,
+          });
+        }
         if (e.type === "text") {
           accumulated += e.text;
           setInflight((s) =>
@@ -1636,6 +1646,11 @@ export default function HomeScreen() {
           setCwd(fullName);
           void saveNote({ id: resolvedNoteId, cwd: fullName });
         }}
+      />
+      <PaywallSheet
+        open={paywall !== null}
+        reason={paywall}
+        onClose={() => setPaywall(null)}
       />
       <IntegrationsSheet
         open={integrationsOpen}
