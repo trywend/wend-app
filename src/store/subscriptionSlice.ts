@@ -22,36 +22,51 @@ export interface SubscriptionState {
   cloudQuotaRemaining: number;
   canPairMac: boolean;
   overageUsdPerDispatch: number;
+  /** When true, the server has told us paywalls are off for this
+   *  environment. The UI treats every user as Pro regardless of tier. */
+  paywallsDisabled: boolean;
   lastSyncedAt: number | null;
 
   setStatus(args: Partial<Omit<SubscriptionState, "setStatus" | "reset">>): void;
   reset(): void;
 }
 
+/** Build-time override. When EXPO_PUBLIC_DISABLE_PAYWALLS is truthy at
+ *  build time, we never gate any dispatch in the app even before the
+ *  user has signed in or the server has replied. The server still has
+ *  its own toggle (WEND_PAYWALLS_DISABLED) which the slice mirrors
+ *  after first sync. */
+export const PAYWALLS_DISABLED_BUILD = (() => {
+  const v = process.env.EXPO_PUBLIC_DISABLE_PAYWALLS;
+  return typeof v === "string" && /^(1|true|yes)$/i.test(v);
+})();
+
 export const useSubscriptionStore = create<SubscriptionState>()(
   persist(
     (set) => ({
-      tier: "free",
+      tier: PAYWALLS_DISABLED_BUILD ? "pro" : "free",
       status: "active",
       currentPeriodEnd: null,
       cloudUsedThisMonth: 0,
       cloudQuotaTotal: 0,
       cloudQuotaRemaining: 0,
-      canPairMac: false,
+      canPairMac: PAYWALLS_DISABLED_BUILD,
       overageUsdPerDispatch: 0.3,
+      paywallsDisabled: PAYWALLS_DISABLED_BUILD,
       lastSyncedAt: null,
 
       setStatus: (args) => set({ ...args, lastSyncedAt: Date.now() }),
       reset: () =>
         set({
-          tier: "free",
+          tier: PAYWALLS_DISABLED_BUILD ? "pro" : "free",
           status: "active",
           currentPeriodEnd: null,
           cloudUsedThisMonth: 0,
           cloudQuotaTotal: 0,
           cloudQuotaRemaining: 0,
-          canPairMac: false,
+          canPairMac: PAYWALLS_DISABLED_BUILD,
           overageUsdPerDispatch: 0.3,
+          paywallsDisabled: PAYWALLS_DISABLED_BUILD,
           lastSyncedAt: null,
         }),
     }),
@@ -67,6 +82,7 @@ export function canDispatch(
   s: SubscriptionState,
   args: { mode: "mac" | "cloud" },
 ): boolean {
+  if (PAYWALLS_DISABLED_BUILD || s.paywallsDisabled) return true;
   if (s.tier === "free") return false;
   if (s.status !== "active") return false;
   if (args.mode === "mac") return s.canPairMac;

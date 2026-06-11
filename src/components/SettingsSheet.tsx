@@ -103,6 +103,7 @@ function SettingsSheetMounted({
   const subStatus = useSubscriptionStore((s) => s.status);
   const subUsed = useSubscriptionStore((s) => s.cloudUsedThisMonth);
   const subQuota = useSubscriptionStore((s) => s.cloudQuotaTotal);
+  const subPaywallsOff = useSubscriptionStore((s) => s.paywallsDisabled);
   const cloudGithubLogin = useCloudStore((s) => s.githubLogin);
   const dispatchMode = useCloudStore((s) => s.dispatchMode);
   const setDispatchMode = useCloudStore((s) => s.setDispatchMode);
@@ -521,23 +522,28 @@ function SettingsSheetMounted({
               <Row
                 Icon={StarIcon}
                 label={
+                  subPaywallsOff ? "Alpha · all features unlocked" :
                   subTier === "pro" ? "Wend Pro" :
                   subTier === "cloud_paygo" ? "Wend Cloud (paygo)" :
                   "Free"
                 }
                 subtitle={
-                  subTier === "pro" && subStatus === "active"
-                    ? `Mac unlimited · ${subUsed}/${subQuota} cloud this month`
-                    : subTier === "free"
-                      ? "Editor only — upgrade to dispatch"
-                      : `Status: ${subStatus}`
+                  subPaywallsOff
+                    ? `No billing during alpha · ${subUsed} cloud dispatches this month`
+                    : subTier === "pro" && subStatus === "active"
+                      ? `Mac unlimited · ${subUsed}/${subQuota} cloud this month`
+                      : subTier === "free"
+                        ? "Editor only — upgrade to dispatch"
+                        : `Status: ${subStatus}`
                 }
                 inkColor={inkColor}
                 subtleColor={subtleColor}
                 tertiaryColor={tertiaryColor}
                 onPress={() => onShowComingSoon?.("Billing portal")}
                 trailing={
-                  subTier === "free" ? (
+                  subPaywallsOff ? (
+                    <StatusPip label="Alpha" color={tokens["accent-default"]} />
+                  ) : subTier === "free" ? (
                     <SmallButtonText label="Upgrade" color={accent} />
                   ) : (
                     <StatusPip

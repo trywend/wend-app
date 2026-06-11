@@ -130,6 +130,7 @@ export function useWendCloudApi() {
         cloud_quota_remaining: number;
         can_pair_mac: boolean;
         overage_usd_per_dispatch: number;
+        paywalls_disabled?: boolean;
       }>("/v1/subscription/status");
     },
 

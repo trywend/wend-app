@@ -28,6 +28,7 @@ export function useSubscriptionSync() {
         cloudQuotaRemaining: s.cloud_quota_remaining,
         canPairMac: s.can_pair_mac,
         overageUsdPerDispatch: s.overage_usd_per_dispatch,
+        paywallsDisabled: Boolean((s as { paywalls_disabled?: boolean }).paywalls_disabled),
       });
     } catch (err) {
       if (err instanceof CloudApiError && err.status === 401) return;
