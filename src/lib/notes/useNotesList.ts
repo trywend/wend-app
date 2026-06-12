@@ -29,6 +29,7 @@ import {
   listNotes,
   type PersistedRun,
 } from "@/lib/notes-storage";
+import { deriveTitleFromBody } from "@/lib/notes/deriveTitle";
 
 export interface NoteListItem {
   id: string;
@@ -74,21 +75,11 @@ function computeItem(
   // lines (the caller should hide the "N lines" pill when 0).
   const bodyLineCount = bodyText.length === 0 ? 0 : bodyText.split("\n").length;
 
-  // Title fallback: empty title → first non-empty body line (trimmed, capped
-  // at ~60 chars) → "Untitled". Avoids blank cards when the user hasn't named
-  // a note yet (which is most of them in this flow).
-  const trimmedTitle = title.trim();
-  let displayTitle = trimmedTitle;
-  if (!displayTitle) {
-    const firstLine = bodyText
-      .split("\n")
-      .map((s) => s.trim())
-      .find((s) => s.length > 0);
-    if (firstLine) {
-      displayTitle = firstLine.length > 60 ? `${firstLine.slice(0, 60)}…` : firstLine;
-    }
-  }
-  if (!displayTitle) displayTitle = "Untitled";
+  // Title fallback: empty title → derived from body (markdown stripped,
+  // ≤4 words, ~32 chars) → "Untitled". Avoids blank cards when the user
+  // hasn't named a note yet (which is most of them in this flow).
+  const displayTitle =
+    title.trim() || deriveTitleFromBody(bodyText) || "Untitled";
 
   return {
     id,
