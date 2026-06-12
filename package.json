@@ -17,6 +17,7 @@
     "drizzle-orm": "^0.45.2",
     "expo": "~56.0.6",
     "expo-auth-session": "^56.0.13",
+    "expo-build-properties": "~56.0.18",
     "expo-camera": "^56.0.7",
     "expo-constants": "~56.0.16",
     "expo-crypto": "~56.0.4",
@@ -52,9 +53,9 @@
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "4.25.2",
     "react-native-svg": "15.15.4",
-    "react-native-zeroconf": "^0.13.8",
     "react-native-web": "~0.21.0",
     "react-native-worklets": "0.8.3",
+    "react-native-zeroconf": "^0.13.8",
     "tailwind-merge": "^3.6.0",
     "zustand": "^5.0.14"
   },
