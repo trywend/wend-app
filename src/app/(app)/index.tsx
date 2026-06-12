@@ -96,6 +96,10 @@ import { useOnboardingStore } from "@/store/onboardingSlice";
 import { useCloudStore } from "@/store/cloudSlice";
 import { setNotificationResponseHandler, consumePendingDeepLink } from "@/lib/notifications";
 import { catchUpRunsForNote } from "@/lib/dispatch/catchUp";
+import {
+  findEditNewStringForPath,
+  findWriteContentForPath,
+} from "@/lib/agentMarkdown";
 import { useWendCloudApi } from "@/lib/wend-cloud-api";
 import { useSubscriptionSync } from "@/lib/useSubscriptionSync";
 import { PaywallSheet, type PaywallReason } from "@/components/PaywallSheet";
@@ -231,7 +235,26 @@ export default function HomeScreen() {
     mimeType?: string;
     name?: string;
     sizeBytes?: number;
+    content?: string;
+    editExcerpt?: string;
   }>({ open: false, path: "" });
+  // Opening a file from a run: when the run's toolCalls carry a Write for
+  // the exact path, embed that content (cloud containers are gone by view
+  // time). An Edit-only path gets its new_string as a best-effort excerpt.
+  function openRunFile(
+    path: string,
+    calls?: Array<{ name: string; input?: unknown }>,
+  ) {
+    const written = calls ? findWriteContentForPath(calls, path) : null;
+    const excerpt =
+      written == null && calls ? findEditNewStringForPath(calls, path) : null;
+    setFileViewer({
+      open: true,
+      path,
+      content: written ?? undefined,
+      editExcerpt: excerpt ?? undefined,
+    });
+  }
   const signOut = useSignOut();
   const [coachmarkVisible, setCoachmarkVisible] = useState(false);
   const { dispatch, running, cancel, isConfigured: daemonConfigured } =
@@ -1065,9 +1088,7 @@ export default function HomeScreen() {
                     ? () => handleRetry(idx, run)
                     : undefined
                 }
-                onOpenFile={(path) =>
-                  setFileViewer({ open: true, path })
-                }
+                onOpenFile={(path) => openRunFile(path, run.toolCalls)}
               />
               <FollowUpInput
                 value={run.followUp}
@@ -1119,7 +1140,7 @@ export default function HomeScreen() {
               state={inflightToBlockState(inflight)}
               onStop={handleStop}
               projectName={inflight.routeName || projectBasename(noteCwd)}
-              onOpenFile={(path) => setFileViewer({ open: true, path })}
+              onOpenFile={(path) => openRunFile(path, inflight.toolCalls)}
             />
           ) : null}
         </ScrollView>
@@ -1705,6 +1726,8 @@ export default function HomeScreen() {
         mimeType={fileViewer.mimeType}
         name={fileViewer.name}
         sizeBytes={fileViewer.sizeBytes}
+        content={fileViewer.content}
+        editExcerpt={fileViewer.editExcerpt}
       />
 
       {/* Note actions — long-press a card to open. Auto-height. */}
@@ -2059,6 +2082,7 @@ function persistedRunToBlockState(run: PersistedRun): AgentRunBlockState {
     response: run.response,
     toolUses: run.toolUses,
     toolCalls: run.toolCalls,
+    links: run.links,
     durationMs: run.durationMs,
     costUsd: run.costUsd,
     error: run.error,

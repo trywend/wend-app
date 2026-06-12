@@ -148,6 +148,9 @@ export function useWendCloudApi() {
           durationMs: number;
           costUsd: number;
           toolUses: string[];
+          toolCalls?: Array<{ name: string; input?: unknown }>;
+          links?: string[];
+          filesChanged?: string[];
           repo: string;
           agentId: string;
         }>;

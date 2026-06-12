@@ -52,6 +52,7 @@ import { Markdown } from "@/components/editor/Markdown";
 import { parseMarkdown, summarizeMarkdown } from "@/lib/agentMarkdown";
 import { ToolCompaction } from "@/components/editor/ToolCompaction";
 import { FileChangesSummary } from "@/components/editor/FileChangesSummary";
+import { RunLinksSummary } from "@/components/editor/RunLinksSummary";
 
 export interface ToolCall {
   name: string;
@@ -70,6 +71,8 @@ export interface AgentRunBlockState {
   toolUses: string[];
   /** Richer per-call records when available. */
   toolCalls?: ToolCall[];
+  /** Deliverable URLs persisted on the run (cloud backend). */
+  links?: string[];
   durationMs: number;
   costUsd: number;
   error: string | null;
@@ -380,6 +383,9 @@ export function AgentRunBlock({
             toolCalls={calls}
             onOpenFile={onOpenFile}
           />
+
+          {/* Deliverables — PRs, branches, dashboards the run produced. */}
+          <RunLinksSummary blocks={blocks} toolCalls={calls} links={state.links} />
 
           {/* Response body */}
           {state.response.length > 0 || running ? (

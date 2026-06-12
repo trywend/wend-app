@@ -509,3 +509,196 @@ export function summarizeMarkdown(input: string, maxLen = 96): string {
   if (collapsed.length <= maxLen) return collapsed;
   return collapsed.slice(0, maxLen - 1).trimEnd() + "…";
 }
+
+function inputPathMatches(obj: Record<string, unknown>, path: string): boolean {
+  return (
+    obj.file_path === path || obj.path === path || obj.notebook_path === path
+  );
+}
+
+/**
+ * Full file content from the LAST Write/Create tool call targeting `path`.
+ * Cloud runs execute in a throwaway container — this embedded content is
+ * the only way the phone can show what got written.
+ */
+export function findWriteContentForPath(
+  calls: Array<{ name?: string; input?: unknown }>,
+  path: string,
+): string | null {
+  let found: string | null = null;
+  for (const call of calls) {
+    if (call?.name !== "Write" && call?.name !== "Create") continue;
+    const input = call.input;
+    if (input == null || typeof input !== "object") continue;
+    const obj = input as Record<string, unknown>;
+    if (!inputPathMatches(obj, path)) continue;
+    if (typeof obj.content === "string") found = obj.content;
+  }
+  return found;
+}
+
+/**
+ * The `new_string` from the last Edit-family tool call targeting `path`.
+ * Best-effort excerpt for when the full file isn't reachable.
+ */
+export function findEditNewStringForPath(
+  calls: Array<{ name?: string; input?: unknown }>,
+  path: string,
+): string | null {
+  let found: string | null = null;
+  for (const call of calls) {
+    if (
+      call?.name !== "Edit" &&
+      call?.name !== "MultiEdit" &&
+      call?.name !== "NotebookEdit"
+    ) {
+      continue;
+    }
+    const input = call.input;
+    if (input == null || typeof input !== "object") continue;
+    const obj = input as Record<string, unknown>;
+    if (!inputPathMatches(obj, path)) continue;
+    if (typeof obj.new_string === "string" && obj.new_string.length > 0) {
+      found = obj.new_string;
+    }
+    const edits = obj.edits;
+    if (Array.isArray(edits)) {
+      for (const e of edits) {
+        if (e && typeof e === "object") {
+          const o = e as Record<string, unknown>;
+          if (typeof o.new_string === "string" && o.new_string.length > 0) {
+            found = o.new_string;
+          }
+        }
+      }
+    }
+  }
+  return found;
+}
+
+/* ───────────────────────── deliverable URL extraction ────────────────── */
+
+const HTTPS_URL_RE = /https:\/\/[^\s<>"'`\\)\]}]+/g;
+
+const NOISE_HOSTS = new Set(["localhost", "127.0.0.1", "example.com"]);
+
+/** Hosts never surfaced as deliverables: local dev servers + doc placeholders. */
+export function isNoiseUrl(url: string): boolean {
+  const m = /^https:\/\/([^/:?#]+)/i.exec(url);
+  if (!m) return true;
+  const host = m[1]!.toLowerCase();
+  return (
+    NOISE_HOSTS.has(host) ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".example.com")
+  );
+}
+
+function cleanUrl(raw: string): string | null {
+  const url = raw.replace(/[.,;:!?]+$/, "");
+  if (url.length <= "https://".length) return null;
+  return url;
+}
+
+function pushUrlsFromText(text: string, push: (url: string) => void): void {
+  for (const m of text.matchAll(HTTPS_URL_RE)) {
+    const cleaned = cleanUrl(m[0]);
+    if (cleaned) push(cleaned);
+  }
+}
+
+/**
+ * Collect https URLs from a parsed block list — both explicit `link` nodes
+ * and bare URLs in text / code spans / code blocks. Deduped, document
+ * order, noise hosts excluded.
+ */
+export function extractHttpsUrlsFromBlocks(blocks: Block[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (url: string) => {
+    if (isNoiseUrl(url) || seen.has(url)) return;
+    seen.add(url);
+    out.push(url);
+  };
+
+  const visitInline = (nodes: InlineNode[]): void => {
+    for (const n of nodes) {
+      switch (n.type) {
+        case "link":
+          if (/^https:\/\//i.test(n.href)) {
+            const cleaned = cleanUrl(n.href);
+            if (cleaned) push(cleaned);
+          }
+          break;
+        case "text":
+        case "code":
+          pushUrlsFromText(n.text, push);
+          break;
+        case "bold":
+        case "italic":
+          visitInline(n.nodes);
+          break;
+        default:
+          break;
+      }
+    }
+  };
+
+  for (const b of blocks) {
+    switch (b.type) {
+      case "paragraph":
+      case "heading":
+      case "quote":
+        visitInline(b.nodes);
+        break;
+      case "list":
+        for (const item of b.items) visitInline(item);
+        break;
+      case "codeBlock":
+        pushUrlsFromText(b.code, push);
+        break;
+      default:
+        break;
+    }
+  }
+  return out;
+}
+
+/**
+ * Collect https URLs from tool call inputs (e.g. a Bash `gh pr create`
+ * command string). Skips file-content keys (`content`, `old_string`,
+ * `new_string`) so a written README full of links doesn't flood the list.
+ */
+export function extractHttpsUrlsFromToolCalls(
+  calls: Array<{ name?: string; input?: unknown }>,
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (url: string) => {
+    if (isNoiseUrl(url) || seen.has(url)) return;
+    seen.add(url);
+    out.push(url);
+  };
+
+  const SKIP_KEYS = new Set(["content", "old_string", "new_string"]);
+  const visit = (v: unknown, depth: number): void => {
+    if (depth > 5 || v == null) return;
+    if (typeof v === "string") {
+      pushUrlsFromText(v, push);
+      return;
+    }
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item, depth + 1);
+      return;
+    }
+    if (typeof v === "object") {
+      for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+        if (SKIP_KEYS.has(k)) continue;
+        visit(val, depth + 1);
+      }
+    }
+  };
+
+  for (const call of calls) visit(call?.input, 0);
+  return out;
+}

@@ -12,16 +12,21 @@
  *   - other  → generic name panel + Share button
  *
  * For paths that look like they live on the user's Mac (no `file:` prefix,
- * no http(s)://), we don't try to render — we show a "this file lives on
- * your Mac" panel with a copy-to-clipboard affordance. A future daemon
- * endpoint can fetch the bytes and render in-line; that's not v1.
+ * no http(s)://), we fetch the bytes from the paired daemon's `GET /file`
+ * endpoint (same bearer token as /run) and render text/images in-line.
+ * 413 (over the daemon's 1 MB cap) gets a "too big" panel; 404 / network
+ * failure / no pairing falls back to the copy-the-path panel.
+ *
+ * Runs can also embed content directly (`content` prop) — cloud runs
+ * execute in a throwaway container, so the Write tool input is the only
+ * copy of the file the phone can ever show.
  *
  * Matches InboxSheet's drag-handle / slide-up / dim-backdrop pattern. The
  * pan gesture is scoped to the header strip so the body scroll inside the
  * text/pdf viewer doesn't fight it.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -64,6 +69,7 @@ try {
 const sharingAvailable = Boolean(Sharing);
 import {
   ClipboardTextIcon,
+  CloudIcon,
   ShareNetworkIcon,
   WarningIcon,
   XIcon,
@@ -71,6 +77,7 @@ import {
 
 import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
+import { useResolvedDaemonURL } from "@/lib/dispatch/useResolvedDaemonURL";
 import { useAndroidBack } from "@/lib/useAndroidBack";
 import {
   classifyAttachment,
@@ -95,6 +102,12 @@ export interface FileViewerModalProps {
   name?: string;
   /** Size in bytes — only known for our own attachments. */
   sizeBytes?: number;
+  /** Pre-fetched file content (cloud runs embed the Write tool input).
+   *  When set, the viewer renders it directly and never fetches. */
+  content?: string;
+  /** `new_string` from an Edit-only cloud change — shown as an excerpt
+   *  when the file itself isn't reachable from the phone. */
+  editExcerpt?: string;
 }
 
 /**
@@ -138,6 +151,8 @@ function Mounted({
   mimeType,
   name,
   sizeBytes,
+  content,
+  editExcerpt,
 }: FileViewerModalProps) {
   const { tokens } = useTheme();
   // Android hardware back closes the viewer.
@@ -149,6 +164,7 @@ function Mounted({
     [mimeType, displayName],
   );
   const isMacPath = useMemo(() => looksLikeMacPath(path), [path]);
+  const hasEmbeddedContent = typeof content === "string";
 
   /* ─── Drag-to-dismiss ─────────────────────────────────────────────── */
   const dragY = useSharedValue(0);
@@ -233,9 +249,10 @@ function Mounted({
   /* ─── Header chip text ────────────────────────────────────────────── */
   const chipText = useMemo(() => {
     if (mimeType) return mimeType;
+    if (hasEmbeddedContent) return "From run";
     if (isMacPath) return "On Mac";
     return kind === "other" ? "File" : kind.toUpperCase();
-  }, [mimeType, isMacPath, kind]);
+  }, [mimeType, hasEmbeddedContent, isMacPath, kind]);
 
   return (
     <View
@@ -391,11 +408,23 @@ function Mounted({
 
         {/* Body — kind-specific renderer. */}
         <View style={{ flex: 1 }}>
-          {isMacPath ? (
-            <MacPathPanel
+          {hasEmbeddedContent ? (
+            <TextContentView
+              content={content!}
+              ink={ink}
+              tertiary={tertiary}
+              surface={surface}
+              border={border}
+            />
+          ) : isMacPath ? (
+            <MacFileBody
               path={path}
+              kind={kind}
+              editExcerpt={editExcerpt}
               ink={ink}
               subtle={subtle}
+              tertiary={tertiary}
+              surface={surface}
               border={border}
               accent={accent}
               chipBg={chipBg}
@@ -556,6 +585,67 @@ function PdfView({
   );
 }
 
+const TEXT_PREVIEW_MAX = 200 * 1024;
+
+function TextContentView({
+  content,
+  ink,
+  tertiary,
+  surface,
+  border,
+}: {
+  content: string;
+  ink: string;
+  tertiary: string;
+  surface: string;
+  border: string;
+}) {
+  const truncated = content.length >= TEXT_PREVIEW_MAX - 1;
+  const shown =
+    content.length > TEXT_PREVIEW_MAX
+      ? content.slice(0, TEXT_PREVIEW_MAX)
+      : content;
+  return (
+    <ScrollView
+      style={{ flex: 1, backgroundColor: surface }}
+      contentContainerStyle={{
+        paddingHorizontal: 16,
+        paddingVertical: 16,
+        paddingBottom: 32,
+      }}
+      showsVerticalScrollIndicator
+    >
+      {truncated ? (
+        <View
+          style={{
+            paddingHorizontal: 10,
+            paddingVertical: 8,
+            borderRadius: 8,
+            borderWidth: 1,
+            borderColor: border,
+            marginBottom: 12,
+          }}
+        >
+          <Text variant="meta" style={{ color: tertiary }}>
+            Preview truncated at 200 KB.
+          </Text>
+        </View>
+      ) : null}
+      <Text
+        style={{
+          fontFamily: "JetBrainsMono",
+          fontSize: 12.5,
+          lineHeight: 19,
+          color: ink,
+        }}
+        selectable
+      >
+        {shown}
+      </Text>
+    </ScrollView>
+  );
+}
+
 function TextFileView({
   uri,
   ink,
@@ -573,22 +663,17 @@ function TextFileView({
 }) {
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [truncated, setTruncated] = useState(false);
-  const MAX_BYTES = 200 * 1024;
 
   useEffect(() => {
     let alive = true;
     (async () => {
-      const text = await readTextFile(uri, MAX_BYTES);
+      const text = await readTextFile(uri, TEXT_PREVIEW_MAX);
       if (!alive) return;
       if (text == null) {
         setError("Couldn't read this file.");
         return;
       }
       setContent(text);
-      // Approximate truncation flag: if we hit exactly the cap, assume the
-      // file might have been larger. False positives are harmless.
-      if (text.length >= MAX_BYTES - 1) setTruncated(true);
     })();
     return () => {
       alive = false;
@@ -634,42 +719,388 @@ function TextFileView({
   }
 
   return (
-    <ScrollView
-      style={{ flex: 1, backgroundColor: surface }}
-      contentContainerStyle={{
-        paddingHorizontal: 16,
-        paddingVertical: 16,
-        paddingBottom: 32,
-      }}
-      showsVerticalScrollIndicator
-    >
-      {truncated ? (
+    <TextContentView
+      content={content}
+      ink={ink}
+      tertiary={tertiary}
+      surface={surface}
+      border={border}
+    />
+  );
+}
+
+/* ───────────────────────── Mac daemon fetch ───────────────────────────── */
+
+function buildDaemonFileURL(base: string, token: string, path: string): string {
+  return `${base.replace(/\/$/, "")}/file?path=${encodeURIComponent(
+    path,
+  )}&t=${encodeURIComponent(token)}`;
+}
+
+function isTextContentType(ct: string): boolean {
+  if (ct === "") return true;
+  return (
+    ct.startsWith("text/") ||
+    ct.includes("json") ||
+    ct.includes("xml") ||
+    ct.includes("javascript") ||
+    ct.includes("yaml")
+  );
+}
+
+type MacFetchState =
+  | { phase: "loading" }
+  | { phase: "text"; content: string }
+  | { phase: "toolarge"; sizeBytes: number }
+  | { phase: "fallback" };
+
+function MacFileBody({
+  path,
+  kind,
+  editExcerpt,
+  ink,
+  subtle,
+  tertiary,
+  surface,
+  border,
+  accent,
+  chipBg,
+}: {
+  path: string;
+  kind: AttachmentKind;
+  editExcerpt?: string;
+  ink: string;
+  subtle: string;
+  tertiary: string;
+  surface: string;
+  border: string;
+  accent: string;
+  chipBg: string;
+}) {
+  const resolved = useResolvedDaemonURL();
+  // Effect reads through a ref so a rendezvous re-resolve mid-fetch doesn't
+  // re-run the effect (the URL refresh is awaited inside it anyway).
+  const resolvedRef = useRef(resolved);
+  resolvedRef.current = resolved;
+
+  const paired = resolved.isReady;
+  const fetchable = kind === "text" || kind === "other";
+  const wantsFetch = paired && fetchable;
+
+  const [state, setState] = useState<MacFetchState>({ phase: "loading" });
+
+  useEffect(() => {
+    if (!wantsFetch) return;
+    let alive = true;
+    setState({ phase: "loading" });
+    (async () => {
+      const r = resolvedRef.current;
+      let base = r.url;
+      // Same stale-tunnel guard as dispatch: await a fresh rendezvous
+      // resolve so the first fetch after a Mac restart doesn't hit a
+      // dead trycloudflare host.
+      if (r.deviceId) {
+        const fresh = await r.refresh().catch(() => null);
+        if (fresh && fresh.length > 0) base = fresh;
+      }
+      if (!alive) return;
+      try {
+        const res = await fetch(buildDaemonFileURL(base, r.token, path));
+        if (!alive) return;
+        if (res.status === 413) {
+          let size = 0;
+          try {
+            const body = (await res.json()) as { sizeBytes?: number };
+            if (typeof body?.sizeBytes === "number") size = body.sizeBytes;
+          } catch {
+            // size stays 0 — panel copy degrades gracefully
+          }
+          if (alive) setState({ phase: "toolarge", sizeBytes: size });
+          return;
+        }
+        if (!res.ok) {
+          setState({ phase: "fallback" });
+          return;
+        }
+        const contentType = (
+          res.headers.get("content-type") ?? ""
+        ).toLowerCase();
+        if (kind === "other" && !isTextContentType(contentType)) {
+          setState({ phase: "fallback" });
+          return;
+        }
+        const text = await res.text();
+        if (alive) setState({ phase: "text", content: text });
+      } catch {
+        if (alive) setState({ phase: "fallback" });
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [path, kind, wantsFetch]);
+
+  if (!paired) {
+    if (editExcerpt) {
+      return (
+        <CloudEditPanel
+          excerpt={editExcerpt}
+          ink={ink}
+          subtle={subtle}
+          border={border}
+          accent={accent}
+          chipBg={chipBg}
+        />
+      );
+    }
+    return (
+      <MacPathPanel
+        path={path}
+        ink={ink}
+        subtle={subtle}
+        border={border}
+        accent={accent}
+        chipBg={chipBg}
+      />
+    );
+  }
+
+  if (kind === "image") {
+    return (
+      <MacImageView
+        url={buildDaemonFileURL(resolved.url, resolved.token, path)}
+        fallback={
+          <MacPathPanel
+            path={path}
+            ink={ink}
+            subtle={subtle}
+            border={border}
+            accent={accent}
+            chipBg={chipBg}
+          />
+        }
+      />
+    );
+  }
+
+  if (!fetchable) {
+    return (
+      <MacPathPanel
+        path={path}
+        ink={ink}
+        subtle={subtle}
+        border={border}
+        accent={accent}
+        chipBg={chipBg}
+      />
+    );
+  }
+
+  switch (state.phase) {
+    case "loading":
+      return (
         <View
-          style={{
-            paddingHorizontal: 10,
-            paddingVertical: 8,
-            borderRadius: 8,
-            borderWidth: 1,
-            borderColor: border,
-            marginBottom: 12,
-          }}
+          style={{ flex: 1, alignItems: "center", justifyContent: "center" }}
         >
-          <Text variant="meta" style={{ color: tertiary }}>
-            Preview truncated at 200 KB.
-          </Text>
+          <ActivityIndicator color={subtle} />
         </View>
-      ) : null}
-      <Text
+      );
+    case "text":
+      return (
+        <TextContentView
+          content={state.content}
+          ink={ink}
+          tertiary={tertiary}
+          surface={surface}
+          border={border}
+        />
+      );
+    case "toolarge":
+      return (
+        <TooLargePanel
+          sizeBytes={state.sizeBytes}
+          ink={ink}
+          subtle={subtle}
+          accent={accent}
+          chipBg={chipBg}
+        />
+      );
+    case "fallback":
+      return (
+        <MacPathPanel
+          path={path}
+          ink={ink}
+          subtle={subtle}
+          border={border}
+          accent={accent}
+          chipBg={chipBg}
+        />
+      );
+  }
+}
+
+function MacImageView({
+  url,
+  fallback,
+}: {
+  url: string;
+  fallback: React.ReactElement;
+}) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return fallback;
+  return (
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: "#111",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Image
+        source={{ uri: url }}
+        contentFit="contain"
+        style={{ width: "100%", height: "100%" }}
+        transition={120}
+        onError={() => setFailed(true)}
+      />
+    </View>
+  );
+}
+
+function TooLargePanel({
+  sizeBytes,
+  ink,
+  subtle,
+  accent,
+  chipBg,
+}: {
+  sizeBytes: number;
+  ink: string;
+  subtle: string;
+  accent: string;
+  chipBg: string;
+}) {
+  const sizeNote =
+    sizeBytes > 0
+      ? `This file is ${formatFileSize(sizeBytes)} — over the 1 MB preview limit.`
+      : "This file is over the 1 MB preview limit.";
+  return (
+    <View
+      style={{
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        paddingHorizontal: 32,
+      }}
+    >
+      <View
         style={{
-          fontFamily: "JetBrainsMono",
-          fontSize: 12.5,
-          lineHeight: 19,
-          color: ink,
+          width: 72,
+          height: 72,
+          borderRadius: 36,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: chipBg,
+          marginBottom: 16,
         }}
-        selectable
       >
-        {content}
+        <WarningIcon size={28} color={accent} weight="regular" />
+      </View>
+      <Text variant="body-em" style={{ color: ink, textAlign: "center" }}>
+        Too big to preview
       </Text>
+      <Text
+        variant="meta"
+        style={{
+          color: subtle,
+          marginTop: 6,
+          textAlign: "center",
+          maxWidth: 280,
+        }}
+      >
+        {`${sizeNote} Copy the path and open it on your Mac.`}
+      </Text>
+    </View>
+  );
+}
+
+function CloudEditPanel({
+  excerpt,
+  ink,
+  subtle,
+  border,
+  accent,
+  chipBg,
+}: {
+  excerpt: string;
+  ink: string;
+  subtle: string;
+  border: string;
+  accent: string;
+  chipBg: string;
+}) {
+  const shown =
+    excerpt.length > 4000 ? `${excerpt.slice(0, 4000)}\n…` : excerpt;
+  return (
+    <ScrollView
+      style={{ flex: 1 }}
+      contentContainerStyle={{
+        paddingHorizontal: 24,
+        paddingVertical: 32,
+        alignItems: "center",
+      }}
+    >
+      <View
+        style={{
+          width: 72,
+          height: 72,
+          borderRadius: 36,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: chipBg,
+          marginBottom: 16,
+        }}
+      >
+        <CloudIcon size={28} color={accent} weight="regular" />
+      </View>
+      <Text variant="body-em" style={{ color: ink, textAlign: "center" }}>
+        Changed in the cloud run
+      </Text>
+      <Text
+        variant="meta"
+        style={{
+          color: subtle,
+          marginTop: 6,
+          textAlign: "center",
+          maxWidth: 320,
+        }}
+      >
+        The cloud workspace is gone, so the full file isn't reachable. This
+        is the section the edit wrote:
+      </Text>
+      <View
+        style={{
+          marginTop: 20,
+          padding: 12,
+          borderRadius: 10,
+          borderWidth: 1,
+          borderColor: border,
+          alignSelf: "stretch",
+        }}
+      >
+        <Text
+          style={{
+            fontFamily: "JetBrainsMono",
+            fontSize: 12.5,
+            color: ink,
+            lineHeight: 19,
+          }}
+          selectable
+        >
+          {shown}
+        </Text>
+      </View>
     </ScrollView>
   );
 }
