@@ -67,12 +67,11 @@ export function PaywallSheet({
         <Pressable
           onPress={onClose}
           accessibilityLabel="Close"
-          style={({ pressed }) => ({
+          style={{
             alignSelf: "flex-start",
             paddingVertical: 8,
             paddingRight: 16,
-            opacity: pressed ? 0.5 : 1,
-          })}
+          }}
         >
           <Text style={{ color: tokens["text-secondary"], fontFamily: "Inter-Medium", fontSize: 15 }}>
             Not now
@@ -288,10 +287,7 @@ function PlanCard({
 
       <Pressable
         onPress={ctaOnPress}
-        style={({ pressed }) => ({
-          marginTop: 18,
-          opacity: pressed ? 0.85 : 1,
-        })}
+        style={{ marginTop: 18 }}
       >
         <View
           style={{

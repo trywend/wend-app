@@ -121,12 +121,11 @@ export function CloudGitHubSheet({
       <Pressable
         onPress={onClose}
         accessibilityLabel="Close"
-        style={({ pressed }) => ({
+        style={{
           alignSelf: "flex-start",
           paddingVertical: 8,
           paddingRight: 16,
-          opacity: pressed ? 0.5 : 1,
-        })}
+        }}
       >
         <Text style={{ color: tokens["text-secondary"], fontFamily: "Inter-Medium", fontSize: 15 }}>
           Cancel
@@ -248,12 +247,11 @@ export function CloudGitHubSheet({
         {postInstallHint ? (
           <Pressable
             onPress={refreshStatus}
-            style={({ pressed }) => ({
+            style={{
               alignSelf: "center",
               marginTop: 16,
               paddingVertical: 10,
-              opacity: pressed ? 0.5 : 1,
-            })}
+            }}
           >
             <Text
               style={{

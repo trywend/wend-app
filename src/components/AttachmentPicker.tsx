@@ -361,7 +361,7 @@ function PickerRow(props: PickerRowProps) {
       accessibilityLabel={props.label}
       accessibilityState={{ disabled: props.disabled }}
       android_ripple={{ color: "rgba(0,0,0,0.07)", borderless: false }}
-      style={({ pressed }) => ({
+      style={{
         flexDirection: "row",
         alignItems: "center",
         gap: 14,
@@ -370,11 +370,11 @@ function PickerRow(props: PickerRowProps) {
         borderRadius: 16,
         borderWidth: 1,
         borderColor: props.border,
-        backgroundColor: pressed ? props.chipBg : props.chipBg + "55",
+        backgroundColor: props.chipBg + "55",
         opacity: props.disabled ? 0.5 : 1,
         marginBottom: 10,
         overflow: "hidden",
-      })}
+      }}
     >
       <View
         style={{

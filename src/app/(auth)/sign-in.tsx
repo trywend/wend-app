@@ -635,10 +635,10 @@ function VerifyView(props: {
           onPress={onVerify}
           disabled={busy || code.length < 6}
           accessibilityRole="button"
-          style={({ pressed }) => ({
+          style={{
             marginTop: 16,
-            opacity: busy || code.length < 6 ? 0.5 : pressed ? 0.85 : 1,
-          })}
+            opacity: busy || code.length < 6 ? 0.5 : 1,
+          }}
         >
           <View
             style={{

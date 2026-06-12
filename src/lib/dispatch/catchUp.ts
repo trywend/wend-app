@@ -8,6 +8,7 @@
  * isn't online, the call no-ops.
  */
 import { getNote, saveNote, type PersistedRun } from "@/lib/notes-storage";
+import { extractFilePathsFromToolCalls } from "@/lib/agentMarkdown";
 import { CloudApiError } from "@/lib/wend-cloud-api";
 
 interface CatchUpDeps {
@@ -25,6 +26,9 @@ interface CatchUpDeps {
         durationMs: number;
         costUsd: number;
         toolUses: string[];
+        toolCalls?: Array<{ name: string; input?: unknown }>;
+        links?: string[];
+        filesChanged?: string[];
         repo: string;
         agentId: string;
       }>;
@@ -66,7 +70,8 @@ export async function catchUpRunsForNote({ noteId, api }: CatchUpDeps): Promise<
     durationMs: r.durationMs,
     costUsd: r.costUsd,
     toolUses: r.toolUses,
-    toolCalls: r.toolUses.map((name) => ({ name })),
+    toolCalls: buildToolCalls(r),
+    links: r.links?.length ? r.links : undefined,
     error: r.status === "error" ? r.response : null,
     followUp: "",
     createdAt: r.createdAt,
@@ -77,4 +82,24 @@ export async function catchUpRunsForNote({ noteId, api }: CatchUpDeps): Promise<
   const merged = [...local.runs, ...newRuns].sort((a, b) => a.createdAt - b.createdAt);
   await saveNote({ id: noteId, runs: merged });
   return newRuns.length;
+}
+
+/** Prefer real toolCalls from the backend; fall back to name-only mapping.
+ *  `filesChanged` folds into rendering as synthetic Edit calls so
+ *  FileChangesSummary surfaces them without a new PersistedRun field. */
+function buildToolCalls(r: {
+  toolUses: string[];
+  toolCalls?: Array<{ name: string; input?: unknown }>;
+  filesChanged?: string[];
+}): Array<{ name: string; input?: unknown }> {
+  const base = r.toolCalls?.length
+    ? r.toolCalls
+    : r.toolUses.map((name) => ({ name }));
+  const changed = r.filesChanged ?? [];
+  if (changed.length === 0) return base;
+  const known = new Set(extractFilePathsFromToolCalls(base));
+  const synthetic = changed
+    .filter((p) => typeof p === "string" && p.length > 0 && !known.has(p))
+    .map((p) => ({ name: "Edit", input: { file_path: p } }));
+  return synthetic.length ? [...base, ...synthetic] : base;
 }

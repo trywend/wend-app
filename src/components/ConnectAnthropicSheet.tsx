@@ -84,12 +84,11 @@ export function ConnectAnthropicSheet({
       <Pressable
         onPress={onClose}
         accessibilityLabel="Close"
-        style={({ pressed }) => ({
+        style={{
           alignSelf: "flex-start",
           paddingVertical: 8,
           paddingRight: 16,
-          opacity: pressed ? 0.5 : 1,
-        })}
+        }}
       >
         <Text style={{ color: tokens["text-secondary"], fontFamily: "Inter-Medium", fontSize: 15 }}>
           Cancel
@@ -155,7 +154,7 @@ export function ConnectAnthropicSheet({
           <Pressable
             onPress={() => setReveal((r) => !r)}
             accessibilityLabel={reveal ? "Hide key" : "Reveal key"}
-            style={({ pressed }) => ({ padding: 6, opacity: pressed ? 0.5 : 1 })}
+            style={{ padding: 6 }}
           >
             {reveal ? (
               <EyeSlashIcon size={18} color={tokens["text-secondary"]} weight="regular" />
@@ -206,15 +205,15 @@ export function ConnectAnthropicSheet({
           onPress={handleDisconnect}
           disabled={busy}
           accessibilityLabel="Remove Anthropic key"
-          style={({ pressed }) => ({
+          style={{
             marginTop: 16,
             alignSelf: "center",
             flexDirection: "row",
             alignItems: "center",
             gap: 6,
             paddingVertical: 8,
-            opacity: pressed ? 0.5 : busy ? 0.4 : 1,
-          })}
+            opacity: busy ? 0.4 : 1,
+          }}
         >
           <TrashIcon size={14} color={tokens["status-failed"]} weight="regular" />
           <Text

@@ -52,6 +52,7 @@ import { Markdown } from "@/components/editor/Markdown";
 import { parseMarkdown, summarizeMarkdown } from "@/lib/agentMarkdown";
 import { ToolCompaction } from "@/components/editor/ToolCompaction";
 import { FileChangesSummary } from "@/components/editor/FileChangesSummary";
+import { RunLinksSummary } from "@/components/editor/RunLinksSummary";
 
 export interface ToolCall {
   name: string;
@@ -70,6 +71,8 @@ export interface AgentRunBlockState {
   toolUses: string[];
   /** Richer per-call records when available. */
   toolCalls?: ToolCall[];
+  /** Deliverable URLs persisted on the run (cloud backend). */
+  links?: string[];
   durationMs: number;
   costUsd: number;
   error: string | null;
@@ -302,14 +305,13 @@ export function AgentRunBlock({
               accessibilityRole="button"
               accessibilityLabel="Stop dispatch"
               hitSlop={8}
-              style={({ pressed }) => ({
+              style={{
                 width: 28,
                 height: 28,
                 borderRadius: 14,
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: pressed ? `${subtle}22` : "transparent",
-              })}
+              }}
             >
               <StopIcon size={14} color={subtle} weight="fill" />
             </Pressable>
@@ -381,6 +383,9 @@ export function AgentRunBlock({
             toolCalls={calls}
             onOpenFile={onOpenFile}
           />
+
+          {/* Deliverables — PRs, branches, dashboards the run produced. */}
+          <RunLinksSummary blocks={blocks} toolCalls={calls} links={state.links} />
 
           {/* Response body */}
           {state.response.length > 0 || running ? (
@@ -463,14 +468,13 @@ export function AgentRunBlock({
                     onPress={onRetry}
                     accessibilityRole="button"
                     accessibilityLabel="Retry dispatch"
-                    style={({ pressed }) => ({
+                    style={{
                       position: "absolute",
                       top: 0,
                       left: 0,
                       right: 0,
                       bottom: 0,
-                      opacity: pressed ? 0.7 : 1,
-                    })}
+                    }}
                   />
                 </View>
               ) : null}
@@ -510,15 +514,14 @@ function ToolDrawer({
         onPress={onToggle}
         accessibilityRole="button"
         accessibilityLabel={open ? "Hide tool calls" : "Show tool calls"}
-        style={({ pressed }) => ({
+        style={{
           paddingHorizontal: 14,
           paddingTop: 12,
           paddingBottom: 8,
           flexDirection: "row",
           alignItems: "center",
           gap: 8,
-          opacity: pressed ? 0.7 : 1,
-        })}
+        }}
       >
         <Text
           style={{

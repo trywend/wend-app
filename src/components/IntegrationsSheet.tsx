@@ -167,14 +167,13 @@ function IntegrationsSheetMounted({
             accessibilityRole="button"
             accessibilityLabel="Back"
             hitSlop={8}
-            style={({ pressed }) => ({
+            style={{
               width: 36,
               height: 36,
               borderRadius: 18,
               alignItems: "center",
               justifyContent: "center",
-              opacity: pressed ? 0.6 : 1,
-            })}
+            }}
           >
             <ArrowLeftIcon size={22} color={inkColor} weight="regular" />
           </Pressable>

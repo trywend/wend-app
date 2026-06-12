@@ -790,10 +790,7 @@ function FilterTab(props: {
       onPress={props.onPress}
       accessibilityRole="button"
       accessibilityState={{ selected: props.active }}
-      style={({ pressed }) => ({
-        flex: 1,
-        opacity: pressed ? 0.7 : 1,
-      })}
+      style={{ flex: 1 }}
     >
       <View
         style={{

@@ -279,14 +279,13 @@ function InboxSheetMounted({
                 accessibilityRole="button"
                 accessibilityLabel="Open settings"
                 hitSlop={8}
-                style={({ pressed }) => ({
+                style={{
                   width: 32,
                   height: 32,
                   borderRadius: 16,
                   alignItems: "center",
                   justifyContent: "center",
-                  opacity: pressed ? 0.6 : 1,
-                })}
+                }}
               >
                 <GearIcon size={20} color={subtleColor} weight="regular" />
               </Pressable>
@@ -451,7 +450,7 @@ function InboxSheetMounted({
             accessibilityRole="button"
             accessibilityLabel="New note"
             android_ripple={{ color: "#B0432A", borderless: false }}
-            style={({ pressed }) => ({
+            style={{
               position: "absolute",
               top: 0,
               left: 0,
@@ -459,8 +458,7 @@ function InboxSheetMounted({
               bottom: 0,
               alignItems: "center",
               justifyContent: "center",
-              opacity: pressed ? 0.85 : 1,
-            })}
+            }}
           >
             <PlusIcon size={28} color="#FFFFFF" weight="bold" />
           </Pressable>
@@ -503,16 +501,15 @@ function FilterChip(props: FilterChipProps) {
       accessibilityRole="button"
       accessibilityState={{ selected: active }}
       android_ripple={{ color: `${activeColor}25`, borderless: false }}
-      style={({ pressed }) => ({
+      style={{
         paddingHorizontal: 16,
         paddingVertical: 6,
         borderRadius: 999,
         borderWidth: 1,
         borderColor: active ? activeBorder : inactiveBorder,
         backgroundColor: active ? activeBg : "transparent",
-        opacity: pressed ? 0.7 : 1,
         overflow: "hidden",
-      })}
+      }}
     >
       <Text
         variant="meta"
@@ -577,7 +574,7 @@ function NoteCard({
       onLongPress={onLongPress}
       accessibilityRole="button"
       android_ripple={{ color: "rgba(0,0,0,0.06)", borderless: false }}
-      style={({ pressed }) => ({
+      style={{
         backgroundColor: tokens.cardBg,
         borderRadius: 14,
         borderWidth: 1,
@@ -587,14 +584,13 @@ function NoteCard({
         padding: 20,
         flexDirection: "column",
         gap: 8,
-        opacity: pressed ? 0.85 : 1,
         shadowColor: "#000",
         shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.05,
         shadowRadius: 4,
         elevation: 1,
         overflow: "hidden",
-      })}
+      }}
     >
       <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
         {/* Status icon. */}
