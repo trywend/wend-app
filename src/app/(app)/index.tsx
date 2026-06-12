@@ -48,7 +48,7 @@ import Animated, {
   SlideInDown,
   SlideOutDown,
 } from "react-native-reanimated";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ArrowUpIcon,
@@ -123,6 +123,8 @@ import {
   AgentRunBlock,
   type AgentRunBlockState,
 } from "@/components/editor/AgentRunBlock";
+import { LiveMarkdownInput } from "@/components/editor/LiveMarkdownInput";
+import type { LiveMarkdownTheme } from "@/lib/liveMarkdownSpans";
 import {
   FirstNoteCoachmark,
   FIRST_NOTE_COACHMARK_KEY,
@@ -153,7 +155,6 @@ const INITIAL_INFLIGHT: InflightRun | null = null;
 
 export default function HomeScreen() {
   const { tokens } = useTheme();
-  const insets = useSafeAreaInsets();
   // currentNoteId switches which note the editor shows. `undefined` means
   // "load the most recent draft" (loadOrCreateDraftNote). Tapping a card in
   // the inbox sets this; the FAB creates a new note and sets it here.
@@ -286,8 +287,14 @@ export default function HomeScreen() {
 
   const isBodyEmpty = body.length === 0;
   const isTitleEmpty = title.length === 0;
+  // Attachments count as content — an attachment-only note must still show
+  // the top bar (and not look like a blank canvas).
   const noUserInputYet =
-    isBodyEmpty && isTitleEmpty && !hasRuns && !inflight;
+    isBodyEmpty &&
+    isTitleEmpty &&
+    !hasRuns &&
+    !inflight &&
+    attachments.length === 0;
   const hasContent = !noUserInputYet;
 
   // Reveal-the-top-bar affordance for the blank canvas. The bar is hidden
@@ -386,9 +393,18 @@ export default function HomeScreen() {
   }
 
   async function handleAttachmentAdded(att: Attachment) {
-    const next = [...attachments, att];
+    // Tag the attachment with where it was added so it renders inline at
+    // that point in the note (-1 = the body section, n = after run n's
+    // follow-up) instead of every attachment piling up under the title.
+    const next = [...attachments, { ...att, afterRun: runs.length - 1 }];
     await persistAttachments(next);
   }
+
+  // Inline grouping — legacy attachments without `afterRun` fall into the
+  // body group so they keep rendering near the top where they used to.
+  const bodyAttachments = attachments.filter((a) => (a.afterRun ?? -1) < 0);
+  const attachmentsForRun = (idx: number) =>
+    attachments.filter((a) => a.afterRun === idx);
 
   async function handleAttachmentRemove(att: Attachment) {
     const next = attachments.filter((a) => a.id !== att.id);
@@ -875,6 +891,17 @@ export default function HomeScreen() {
   const surfaceChip = tokens["surface-chip"];
   const canvas = tokens["surface-canvas"];
 
+  // Live markdown styling for the editable inputs (body + follow-ups).
+  const liveMdTheme: LiveMarkdownTheme = useMemo(
+    () => ({
+      ink: inkColor,
+      subtle: subtleColor,
+      accent,
+      surfaceChip,
+    }),
+    [inkColor, subtleColor, accent, surfaceChip],
+  );
+
   return (
     <SafeAreaView
       style={{ flex: 1, backgroundColor: canvas }}
@@ -1011,18 +1038,6 @@ export default function HomeScreen() {
             }}
           />
 
-          {attachments.length > 0 ? (
-            <AttachmentStrip
-              attachments={attachments}
-              borderColor={borderColor}
-              chipBg={surfaceChip}
-              ink={inkColor}
-              subtle={subtleColor}
-              onOpen={handleAttachmentOpen}
-              onRemove={handleAttachmentRemove}
-            />
-          ) : null}
-
           <Pressable
             style={{ minHeight: 80 }}
             onPress={() => bodyRef.current?.focus()}
@@ -1043,12 +1058,12 @@ export default function HomeScreen() {
                 />
               ) : null}
 
-              <TextInput
+              <LiveMarkdownInput
                 ref={bodyRef}
                 value={body}
                 onChangeText={setBody}
+                theme={liveMdTheme}
                 autoFocus
-                multiline
                 caretHidden={showCaretOverlay}
                 textAlignVertical="top"
                 placeholder={hasContent ? "Write a thought..." : ""}
@@ -1074,6 +1089,20 @@ export default function HomeScreen() {
               />
             </View>
           </Pressable>
+
+          {/* Attachments added while composing the body render inline here,
+              under the text they belong to — not pinned above everything. */}
+          {bodyAttachments.length > 0 ? (
+            <AttachmentStrip
+              attachments={bodyAttachments}
+              borderColor={borderColor}
+              chipBg={surfaceChip}
+              ink={inkColor}
+              subtle={subtleColor}
+              onOpen={handleAttachmentOpen}
+              onRemove={handleAttachmentRemove}
+            />
+          ) : null}
 
           {/* Render completed runs + their follow-up inputs in chronological
               order. Each run is readonly; each follow-up is editable and
@@ -1102,21 +1131,11 @@ export default function HomeScreen() {
                 placeholderColor={placeholderColor}
                 inkColor={inkColor}
                 caretColor={tokens["accent-caret"]}
-                accentColor={accent}
-                accentOnColor={accentOn}
-                surfaceChipColor={surfaceChip}
-                tertiaryColor={tokens["text-tertiary"]}
+                mdTheme={liveMdTheme}
                 inputRef={(r) => {
                   followUpRefs.current[idx] = r;
                 }}
                 isLast={idx === lastRunIdx}
-                showSend={idx === lastRunIdx && !inflight}
-                canSend={
-                  idx === lastRunIdx && run.followUp.trim().length > 0
-                }
-                isStreaming={isStreaming}
-                onSend={handleSend}
-                onStop={handleStop}
                 onFocus={() => {
                   // Wait for the keyboard to start rising, then scroll the
                   // focused input into view. Android with adjustResize will
@@ -1130,6 +1149,19 @@ export default function HomeScreen() {
                   );
                 }}
               />
+              {/* Attachments added while composing THIS follow-up render
+                  right under it — inline with the conversation flow. */}
+              {attachmentsForRun(idx).length > 0 ? (
+                <AttachmentStrip
+                  attachments={attachmentsForRun(idx)}
+                  borderColor={borderColor}
+                  chipBg={surfaceChip}
+                  ink={inkColor}
+                  subtle={subtleColor}
+                  onOpen={handleAttachmentOpen}
+                  onRemove={handleAttachmentRemove}
+                />
+              ) : null}
             </View>
           ))}
 
@@ -1286,15 +1318,20 @@ export default function HomeScreen() {
           </Animated.View>
         ) : null}
 
-        {/* ─── Keyboard toolbar (S2 only) ───────────────────────────────
+        {/* ─── Keyboard toolbar ─────────────────────────────────────────
             Two-part layout:
               [ formatting (horizontal scroll) | attach | send ]
             Formatting inserts markdown at the cursor (line-leading
             prefixes for headings/lists/quotes; wrappers for bold/italic/
             code/link). The target field is the body for the first send,
             otherwise the last follow-up — same routing as handleSend.
-            Send stays as the prominent right-edge ember pill. */}
-        {hasContent ? (
+            Send stays as the prominent right-edge ember pill.
+
+            Always rendered — including on the blank canvas — so attach
+            (and send) are reachable before the user has typed anything.
+            This toolbar send is the ONLY send affordance; the old S1
+            floating FAB and the inline follow-up send are gone. */}
+        {(
           <Animated.View
             entering={SlideInDown.duration(220)}
             exiting={SlideOutDown.duration(160)}
@@ -1531,87 +1568,33 @@ export default function HomeScreen() {
               </Pressable>
             </View>
           </Animated.View>
-        ) : null}
+        )}
 
-        {/* ─── Floating send + coachmark (S1 only — blank canvas) ─────── */}
-        {!hasContent ? (
+        {/* ─── First-note coachmark (S1 only — blank canvas) ─────── */}
+        {shouldShowCoachmark ? (
           <Pressable
-            // The whole right-bottom region is the dismissal hit area for
-            // the coachmark (per design: "Tap anywhere on screen to dismiss
-            // permanently"). The send button intercepts its own taps via
-            // event ordering — nested Pressable's onPress fires first.
-            onPress={() => {
-              if (coachmarkVisible) dismissCoachmark();
-            }}
+            // Tap anywhere dismisses permanently (per design). The toolbar
+            // sits below this overlay's hit region only while the coachmark
+            // is up — first tap dismisses, then the toolbar is interactive.
+            onPress={dismissCoachmark}
             style={{
               position: "absolute",
               right: 0,
               left: 0,
-              bottom: 0,
+              bottom: TOOLBAR_HEIGHT,
               top: 0,
-              // pointerEvents-box-none: only the children handle taps.
-              // We need the actual hits-anywhere-to-dismiss; let the
-              // background Pressable claim them.
             }}
-            pointerEvents={coachmarkVisible ? "auto" : "box-none"}
           >
             <View
-              pointerEvents="box-none"
+              pointerEvents="none"
               style={{
                 position: "absolute",
-                right: 20,
-                bottom: Math.max(insets.bottom, 16) + 8,
+                right: 16,
+                bottom: 8,
                 alignItems: "flex-end",
               }}
             >
-              {shouldShowCoachmark ? <FirstNoteCoachmark /> : null}
-              <View
-                style={{
-                  width: 56,
-                  height: 56,
-                  borderRadius: 28,
-                  overflow: "hidden",
-                  backgroundColor: canSend ? accent : surfaceChip,
-                  opacity: canSend ? 1 : 0.6,
-                  borderWidth: canSend ? 0 : 1,
-                  borderColor: borderColor,
-                  shadowColor: "#000",
-                  shadowOpacity: canSend ? 0.18 : 0.05,
-                  shadowRadius: canSend ? 10 : 2,
-                  shadowOffset: { width: 0, height: canSend ? 4 : 1 },
-                  elevation: canSend ? 4 : 1,
-                }}
-              >
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: !canSend }}
-                  accessibilityLabel="Send note"
-                  onPress={() => {
-                    if (coachmarkVisible) dismissCoachmark();
-                    void handleSend();
-                  }}
-                  disabled={!canSend}
-                  android_ripple={Platform.select({
-                    android: {
-                      color: "rgba(255,255,255,0.22)",
-                      borderless: false,
-                      foreground: true,
-                    } as const,
-                    default: undefined,
-                  })}
-                  style={{
-                    flex: 1,
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <ArrowUpIcon
-                    size={24}
-                    color={canSend ? accentOn : tokens["text-tertiary"]}
-                    weight="bold"
-                  />
-                </Pressable>
-              </View>
+              <FirstNoteCoachmark />
             </View>
           </Pressable>
         ) : null}
@@ -1839,50 +1822,37 @@ function FollowUpInput(props: {
   placeholderColor: string;
   inkColor: string;
   caretColor: string;
-  accentColor: string;
-  accentOnColor: string;
-  surfaceChipColor: string;
-  tertiaryColor: string;
+  mdTheme: LiveMarkdownTheme;
   inputRef: (r: TextInput | null) => void;
   isLast: boolean;
-  /** Only render the inline send button under the LAST follow-up — that's
-   *  the only one the user can actually dispatch. Older follow-ups are just
-   *  history (a record of what was sent that turn). */
-  showSend: boolean;
-  canSend: boolean;
-  isStreaming: boolean;
-  onSend: () => void;
-  onStop: () => void;
   onFocus: () => void;
 }) {
+  // No inline send button here — the keyboard toolbar (always visible) owns
+  // the single send affordance. Having both confused users with two sends.
   return (
     <View
       style={{
         marginTop: 16,
         marginBottom: props.isLast ? 0 : 4,
-        flexDirection: "row",
-        alignItems: "flex-end",
-        gap: 10,
       }}
     >
-      <TextInput
+      <LiveMarkdownInput
         ref={props.inputRef}
         value={props.value}
         onChangeText={props.onChangeText}
+        theme={props.mdTheme}
         onFocus={props.onFocus}
         onSelectionChange={
           props.onSelectionChange
             ? (e) => props.onSelectionChange!(e.nativeEvent.selection)
             : undefined
         }
-        multiline
         placeholder={props.placeholder}
         placeholderTextColor={props.placeholderColor}
         selectionColor={props.caretColor}
         scrollEnabled={false}
         textAlignVertical="top"
         style={{
-          flex: 1,
           minHeight: 40,
           fontFamily: "Inter-Regular",
           fontSize: typography.body.fontSize,
@@ -1894,62 +1864,6 @@ function FollowUpInput(props: {
           textAlignVertical: "top",
         }}
       />
-      {props.showSend ? (
-        <View
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: 20,
-            overflow: "hidden",
-            backgroundColor:
-              props.isStreaming || props.canSend
-                ? props.accentColor
-                : props.surfaceChipColor,
-            opacity: props.isStreaming || props.canSend ? 1 : 0.55,
-            shadowColor: "#000",
-            shadowOpacity: props.canSend ? 0.18 : 0,
-            shadowRadius: 6,
-            shadowOffset: { width: 0, height: 2 },
-            elevation: props.canSend ? 3 : 0,
-            flexShrink: 0,
-          }}
-        >
-          <Pressable
-            onPress={props.isStreaming ? props.onStop : props.onSend}
-            disabled={!props.isStreaming && !props.canSend}
-            accessibilityRole="button"
-            accessibilityLabel={
-              props.isStreaming ? "Stop dispatch" : "Send follow-up"
-            }
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            android_ripple={Platform.select({
-              android: {
-                color: "rgba(255,255,255,0.20)",
-                borderless: false,
-                foreground: true,
-              } as const,
-              default: undefined,
-            })}
-            style={{
-              flex: 1,
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            {props.isStreaming ? (
-              <StopIcon size={16} color={props.accentOnColor} weight="fill" />
-            ) : (
-              <ArrowUpIcon
-                size={18}
-                color={
-                  props.canSend ? props.accentOnColor : props.tertiaryColor
-                }
-                weight="bold"
-              />
-            )}
-          </Pressable>
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -2209,7 +2123,7 @@ async function generateAutoTitle(args: {
   if (!args.url || !args.token) return null;
   const excerpt = args.body.trim().slice(0, 500);
   if (excerpt.length === 0) return null;
-  const prompt = `Generate a 2-6 word title (no quotes, no period) for this note body:\n\n"""\n${excerpt}\n"""\n\nReply with the title only.`;
+  const prompt = `Generate a 2-4 word title (no quotes, no period, never more than 4 words) for this note body:\n\n"""\n${excerpt}\n"""\n\nReply with the title only.`;
   try {
     const { fetch: expoFetch } = await import("expo/fetch");
     const url = `${args.url.replace(/\/$/, "")}/run?t=${encodeURIComponent(args.token)}`;
@@ -2253,6 +2167,10 @@ async function generateAutoTitle(args: {
       .replace(/^["'`]+|["'`]+$/g, "")
       .replace(/\.+$/, "")
       .replace(/\s+/g, " ")
+      // Hard cap at 4 words — the prompt asks, this enforces.
+      .split(" ")
+      .slice(0, 4)
+      .join(" ")
       .slice(0, 60);
     return cleaned.length > 0 ? cleaned : null;
   } catch {

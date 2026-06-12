@@ -69,6 +69,10 @@ export interface Attachment {
   sizeBytes: number;
   /** ms epoch. */
   addedAt: number;
+  /** Where this attachment renders inline in the editor: -1 (or absent,
+   *  for pre-existing data) = under the body text; n ≥ 0 = under run n's
+   *  follow-up. Set at add time to the last run index. */
+  afterRun?: number;
 }
 
 /** Per-attachment directory root (relative to Paths.document). */
