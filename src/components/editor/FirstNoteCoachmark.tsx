@@ -1,8 +1,8 @@
 /**
  * Wend — FirstNoteCoachmark.
  *
- * One-time tooltip that floats above the S1 floating send button on the
- * user's very first note. Bobs gently on the Y axis at ~3s cycle.
+ * One-time tooltip that floats above the keyboard toolbar's send button on
+ * the user's very first note. Bobs gently on the Y axis at ~3s cycle.
  *
  * Dismissal is permanent per-device — persisted to AsyncStorage under the
  * key `wend.coachmark.firstNote.dismissed`. After dismissal, the consumer

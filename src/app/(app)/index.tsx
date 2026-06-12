@@ -124,7 +124,8 @@ import {
   type AgentRunBlockState,
 } from "@/components/editor/AgentRunBlock";
 import { LiveMarkdownInput } from "@/components/editor/LiveMarkdownInput";
-import type { LiveMarkdownTheme } from "@/lib/liveMarkdownSpans";
+import type { LiveMarkdownTheme } from "@/lib/liveMarkdownParser";
+import { deriveTitleFromBody } from "@/lib/notes/deriveTitle";
 import {
   FirstNoteCoachmark,
   FIRST_NOTE_COACHMARK_KEY,
@@ -326,9 +327,8 @@ export default function HomeScreen() {
   const isStreaming = running || inflight?.status === "running";
 
   // Markdown hint — lights up when the line at the cursor starts with a
-  // markdown token. The body TextInput can't multi-style its editable text
-  // (RN limitation), so this chip is the only feedback that the daemon will
-  // parse `# hey` as a heading.
+  // markdown token. Complements the live-rendered markdown in the input by
+  // naming the block the cursor sits in (`MD · H2`).
   const activeMarkdownHint = useMemo(
     () =>
       detectMarkdownToken(
@@ -565,7 +565,7 @@ export default function HomeScreen() {
     const prompt = candidate;
 
     // Auto-title: when the user sends an untitled first dispatch, fire a
-    // small parallel Claude call to summarize the body into a 2–6 word
+    // small parallel Claude call to summarize the body into a 2–4 word
     // title. Non-blocking; if the user types a title before this resolves
     // we discard the result.
     if (
@@ -627,7 +627,7 @@ export default function HomeScreen() {
       // noteId publishes "this note is running" to the dispatchSlice so the
       // inbox renders a running pip on the matching card.
       noteId: resolvedNoteId || undefined,
-      noteTitle: title.trim() || body.trim().split("\n")[0]?.slice(0, 60) || "Untitled note",
+      noteTitle: title.trim() || deriveTitleFromBody(body) || "Untitled note",
       // Deliver the note's attachments to the daemon for this run so Claude
       // can read them. Re-sent each turn (the daemon overwrites by name) so
       // follow-ups keep access without the phone tracking staged paths.
@@ -1451,10 +1451,8 @@ export default function HomeScreen() {
               />
             </ScrollView>
 
-            {/* MD hint chip — lights up when the cursor line starts with a
-                markdown token. The only feedback the user gets that their
-                `# hey` will render as a heading on the receiving side, since
-                the body TextInput can't multi-style its own text. */}
+            {/* MD hint chip — names the markdown block the cursor sits in,
+                complementing the live-rendered styling in the input. */}
             {activeMarkdownHint ? (
               <View
                 style={{

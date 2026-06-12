@@ -1,32 +1,26 @@
 /**
- * Wend — multiline TextInput that highlights markdown live as the user types.
+ * Wend — multiline input that highlights markdown live as the user types.
  *
- * Approach: React Native's <TextInput multiline> accepts <Text> children
- * which override its visual rendering while the controlled `value` prop
- * remains the source of truth for the editing buffer. We tokenize `value`
- * into per-character styled spans (see `lib/liveMarkdownSpans.ts`) and
- * render them as children. The TextInput owns selection / cursor / IME;
- * we never mutate text length, so the cursor positions remain correct.
+ * Backed by @expensify/react-native-live-markdown's MarkdownTextInput: a
+ * native drop-in TextInput replacement that styles ranges produced by a
+ * worklet parser (see `lib/liveMarkdownParser.ts`). The previous approach —
+ * styled <Text> spans as TextInput children — rendered plain on Android
+ * under the new architecture, so styling now happens at the native layer.
  *
- * Why not the transparent-overlay technique: it forced exact font-metric
- * matching (impossible across heading sizes) and the cursor still drifted
- * on Android. Children-as-display is RN-native and works across both
- * platforms without metrics gymnastics.
- *
- * `value` is left undefined intentionally when passing children — instead
- * we read it back via children content. To keep this controlled, callers
- * pass both `value` and `onChangeText`; we pass `value` to the input AND
- * render children. RN merges these correctly (children supplies the
- * rendered glyphs; value remains the editing buffer).
+ * `value` remains the raw markdown editing buffer (dispatch reads it); the
+ * parser only decorates ranges. All TextInput props (selection, focus refs,
+ * caretHidden, placeholder) pass straight through.
  */
-import { forwardRef } from "react";
-import { TextInput, type TextInputProps } from "react-native";
+import { forwardRef, useMemo } from "react";
+import type { Ref, ComponentRef } from "react";
+import type { TextInput, TextInputProps } from "react-native";
+import { MarkdownTextInput } from "@expensify/react-native-live-markdown";
 
 import {
-  tokenizeLiveMarkdown,
+  buildMarkdownStyle,
+  parseWendMarkdown,
   type LiveMarkdownTheme,
-} from "@/lib/liveMarkdownSpans";
-import { Text } from "@/components/primitives";
+} from "@/lib/liveMarkdownParser";
 
 export interface LiveMarkdownInputProps
   extends Omit<TextInputProps, "children"> {
@@ -37,24 +31,21 @@ export interface LiveMarkdownInputProps
 
 export const LiveMarkdownInput = forwardRef<TextInput, LiveMarkdownInputProps>(
   function LiveMarkdownInput({ value, theme, style, ...rest }, ref) {
-    const spans = tokenizeLiveMarkdown(value, theme);
+    const markdownStyle = useMemo(() => buildMarkdownStyle(theme), [theme]);
 
     return (
-      <TextInput
-        ref={ref}
+      <MarkdownTextInput
+        // MarkdownTextInput's instance extends TextInput, so a TextInput ref
+        // receives a compatible instance — TS just can't prove it across the
+        // intersection type.
+        ref={ref as Ref<ComponentRef<typeof MarkdownTextInput>>}
         value={value}
         multiline
+        parser={parseWendMarkdown}
+        markdownStyle={markdownStyle}
         style={style}
         {...rest}
-      >
-        {spans.length > 0
-          ? spans.map((s, i) => (
-              <Text key={i} style={s.style}>
-                {s.text}
-              </Text>
-            ))
-          : null}
-      </TextInput>
+      />
     );
   },
 );
