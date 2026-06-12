@@ -270,10 +270,10 @@ export default function OnboardingScreen() {
           accessibilityRole="button"
           accessibilityLabel="Use cloud agents instead"
           disabled={paired}
-          style={({ pressed }) => ({
+          style={{
             marginTop: 12,
-            opacity: paired ? 0 : pressed ? 0.85 : 1,
-          })}
+            opacity: paired ? 0 : 1,
+          }}
         >
           <View
             style={{
@@ -307,11 +307,11 @@ export default function OnboardingScreen() {
           accessibilityRole="button"
           accessibilityLabel="Skip pairing for now"
           disabled={paired}
-          style={({ pressed }) => ({
+          style={{
             marginTop: 16,
             alignSelf: "center",
-            opacity: paired ? 0 : pressed ? 0.55 : 1,
-          })}
+            opacity: paired ? 0 : 1,
+          }}
         >
           <Text
             style={{

@@ -202,10 +202,7 @@ function NoteActionsSheetMounted({
               onPress={handleDeleteConfirm}
               accessibilityRole="button"
               accessibilityLabel="Delete"
-              style={({ pressed }) => ({
-                opacity: pressed ? 0.88 : 1,
-                marginBottom: 8,
-              })}
+              style={{ marginBottom: 8 }}
             >
               <View
                 style={{

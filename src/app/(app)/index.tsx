@@ -1128,8 +1128,8 @@ export default function HomeScreen() {
             Outer View owns the absolute layout — NativeWind/Pressable
             interaction bug: layout props inside a function-callback
             style are silently dropped on Android, so the hit area
-            ended up somewhere wrong. Inner Pressable only handles
-            press feedback. */}
+            ended up somewhere wrong. Inner Pressable carries a STATIC
+            style only — never a function. */}
         {!showTopBar ? (
           <View
             pointerEvents="box-none"
@@ -1146,12 +1146,11 @@ export default function HomeScreen() {
               onPress={revealTopBar}
               accessibilityRole="button"
               accessibilityLabel="Show top bar"
-              style={({ pressed }) => ({
+              style={{
                 flex: 1,
                 alignItems: "center",
                 justifyContent: "center",
-                opacity: pressed ? 0.6 : 1,
-              })}
+              }}
             >
               <View
                 style={{
@@ -1182,11 +1181,12 @@ export default function HomeScreen() {
             }}
             pointerEvents="box-none"
           >
-            <Pressable
-              onPress={handleConfirmChip}
-              accessibilityRole="button"
-              accessibilityLabel="Send to Claude on Mac"
-              style={({ pressed }) => ({
+            {/* Outer plain View owns ALL pill layout — Pressable
+                function-callback styles drop layout/visual props on
+                Android, so the tappable areas inside are Pressables
+                with static styles only. */}
+            <View
+              style={{
                 flexDirection: "row",
                 alignItems: "center",
                 maxWidth: "100%",
@@ -1202,43 +1202,53 @@ export default function HomeScreen() {
                 shadowRadius: 12,
                 shadowOffset: { width: 0, height: 4 },
                 elevation: 4,
-                opacity: pressed ? 0.8 : 1,
-                transform: [{ scale: pressed ? 0.98 : 1 }],
-              })}
+              }}
             >
-              <Text
+              <Pressable
+                onPress={handleConfirmChip}
+                accessibilityRole="button"
+                accessibilityLabel="Send to Claude on Mac"
                 style={{
-                  fontFamily: "Inter-Medium",
-                  fontSize: 13,
-                  color: inkColor,
-                  marginRight: 10,
                   flexShrink: 1,
                   flexGrow: 0,
+                  marginRight: 10,
+                  justifyContent: "center",
                 }}
-                numberOfLines={1}
-                ellipsizeMode="tail"
               >
-                Send to Claude{dispatchSignal ? ` (${dispatchSignal})` : ""} on Mac
-              </Text>
+                <Text
+                  style={{
+                    fontFamily: "Inter-Medium",
+                    fontSize: 13,
+                    color: inkColor,
+                  }}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  Send to Claude{dispatchSignal ? ` (${dispatchSignal})` : ""} on Mac
+                </Text>
+              </Pressable>
               <Pressable
                 onPress={handleDismissChip}
                 accessibilityRole="button"
                 accessibilityLabel="Dismiss suggestion"
                 hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-                style={({ pressed }) => ({
+                android_ripple={ANDROID_ICON_RIPPLE}
+                style={{
                   width: 32,
                   height: 32,
                   borderRadius: 16,
                   alignItems: "center",
                   justifyContent: "center",
-                  opacity: pressed ? 0.5 : 1,
                   marginRight: 4,
                   flexShrink: 0,
-                })}
+                }}
               >
                 <XIcon size={16} color={subtleColor} weight="bold" />
               </Pressable>
-              <View
+              <Pressable
+                onPress={handleConfirmChip}
+                accessibilityRole="button"
+                accessibilityLabel="Send to Claude on Mac"
                 style={{
                   width: 32,
                   height: 32,
@@ -1250,8 +1260,8 @@ export default function HomeScreen() {
                 }}
               >
                 <CheckIcon size={16} color={accentOn} weight="bold" />
-              </View>
-            </Pressable>
+              </Pressable>
+            </View>
           </Animated.View>
         ) : null}
 
@@ -1429,13 +1439,11 @@ export default function HomeScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Attach file"
                 android_ripple={ANDROID_ICON_RIPPLE}
-                style={({ pressed }) => ({
+                style={{
                   flex: 1,
                   alignItems: "center",
                   justifyContent: "center",
-                  opacity: pressed ? 0.55 : 1,
-                  transform: [{ scale: pressed ? 0.94 : 1 }],
-                })}
+                }}
               >
                 <PaperclipIcon
                   size={20}
@@ -1448,8 +1456,8 @@ export default function HomeScreen() {
             {/* Send — outer View owns sizing + background color (these
                 drop on Android inside a Pressable function-callback
                 style on some devices, which is how the icon ended up
-                rendering white-on-white). Inner Pressable only carries
-                press feedback. */}
+                rendering white-on-white). Inner Pressable carries a
+                STATIC centering style; press feedback is the ripple. */}
             <View
               style={{
                 width: 40,
@@ -1484,12 +1492,11 @@ export default function HomeScreen() {
                   } as const,
                   default: undefined,
                 })}
-                style={({ pressed }) => ({
+                style={{
                   flex: 1,
                   alignItems: "center",
                   justifyContent: "center",
-                  transform: [{ scale: pressed ? 0.94 : 1 }],
-                })}
+                }}
               >
                 {isStreaming ? (
                   <StopIcon size={16} color={accentOn} weight="fill" />
@@ -1571,12 +1578,11 @@ export default function HomeScreen() {
                     } as const,
                     default: undefined,
                   })}
-                  style={({ pressed }) => ({
+                  style={{
                     flex: 1,
                     alignItems: "center",
                     justifyContent: "center",
-                    transform: [{ scale: pressed && canSend ? 0.95 : 1 }],
-                  })}
+                  }}
                 >
                   <ArrowUpIcon
                     size={24}
@@ -1745,13 +1751,11 @@ function IconButton(props: {
         accessibilityRole="button"
         accessibilityLabel={props.accessibilityLabel}
         android_ripple={ANDROID_ICON_RIPPLE}
-        style={({ pressed }) => ({
+        style={{
           flex: 1,
           alignItems: "center",
           justifyContent: "center",
-          opacity: pressed ? 0.55 : 1,
-          transform: [{ scale: pressed ? 0.95 : 1 }],
-        })}
+        }}
       >
         {props.icon}
       </Pressable>
@@ -1775,13 +1779,11 @@ function MarkdownButton(props: {
         accessibilityLabel={props.accessibilityLabel}
         hitSlop={{ top: 4, bottom: 4, left: 2, right: 2 }}
         android_ripple={ANDROID_ICON_RIPPLE}
-        style={({ pressed }) => ({
+        style={{
           flex: 1,
           alignItems: "center",
           justifyContent: "center",
-          opacity: pressed ? 0.55 : 1,
-          transform: [{ scale: pressed ? 0.94 : 1 }],
-        })}
+        }}
       >
         {props.icon}
       </Pressable>
@@ -1905,12 +1907,11 @@ function FollowUpInput(props: {
               } as const,
               default: undefined,
             })}
-            style={({ pressed }) => ({
+            style={{
               flex: 1,
               alignItems: "center",
               justifyContent: "center",
-              transform: [{ scale: pressed ? 0.94 : 1 }],
-            })}
+            }}
           >
             {props.isStreaming ? (
               <StopIcon size={16} color={props.accentOnColor} weight="fill" />
@@ -2009,7 +2010,8 @@ function AttachmentChip(props: {
       onLongPress={confirmRemove}
       accessibilityRole="button"
       accessibilityLabel={`Attachment ${attachment.name}`}
-      style={({ pressed }) => ({
+      android_ripple={ANDROID_ICON_RIPPLE}
+      style={{
         width: 56,
         height: 56,
         borderRadius: 10,
@@ -2019,8 +2021,7 @@ function AttachmentChip(props: {
         overflow: "hidden",
         alignItems: "center",
         justifyContent: "center",
-        opacity: pressed ? 0.8 : 1,
-      })}
+      }}
     >
       {kind === "image" ? (
         <RNImage

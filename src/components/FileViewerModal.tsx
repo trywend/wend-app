@@ -375,14 +375,13 @@ function Mounted({
                 accessibilityRole="button"
                 accessibilityLabel="Close"
                 hitSlop={10}
-                style={({ pressed }) => ({
+                style={{
                   width: 32,
                   height: 32,
                   borderRadius: 16,
                   alignItems: "center",
                   justifyContent: "center",
-                  opacity: pressed ? 0.6 : 1,
-                })}
+                }}
               >
                 <XIcon size={20} color={subtle} weight="regular" />
               </Pressable>
@@ -850,7 +849,7 @@ function FooterButton({
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={label}
-      style={({ pressed }) => ({
+      style={{
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "center",
@@ -860,8 +859,7 @@ function FooterButton({
         borderRadius: 12,
         borderWidth: 1,
         borderColor: border,
-        backgroundColor: pressed ? chipBg : "transparent",
-      })}
+      }}
     >
       {icon}
       <Text

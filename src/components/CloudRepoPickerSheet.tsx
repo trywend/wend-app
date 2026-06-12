@@ -80,12 +80,11 @@ export function CloudRepoPickerSheet({
         <Pressable
           onPress={onClose}
           accessibilityLabel="Close"
-          style={({ pressed }) => ({
+          style={{
             alignSelf: "flex-start",
             paddingVertical: 8,
             paddingRight: 16,
-            opacity: pressed ? 0.5 : 1,
-          })}
+          }}
         >
           <Text style={{ color: tokens["text-secondary"], fontFamily: "Inter-Medium", fontSize: 15 }}>
             Cancel
@@ -128,12 +127,11 @@ export function CloudRepoPickerSheet({
           <Pressable
             onPress={load}
             accessibilityLabel="Retry"
-            style={({ pressed }) => ({
+            style={{
               marginTop: 16,
               alignSelf: "flex-start",
               paddingVertical: 8,
-              opacity: pressed ? 0.5 : 1,
-            })}
+            }}
           >
             <Text style={{ color: tokens["accent-default"], fontFamily: "Inter-SemiBold", fontSize: 14 }}>
               Retry

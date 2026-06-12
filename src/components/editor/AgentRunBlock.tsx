@@ -302,14 +302,13 @@ export function AgentRunBlock({
               accessibilityRole="button"
               accessibilityLabel="Stop dispatch"
               hitSlop={8}
-              style={({ pressed }) => ({
+              style={{
                 width: 28,
                 height: 28,
                 borderRadius: 14,
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: pressed ? `${subtle}22` : "transparent",
-              })}
+              }}
             >
               <StopIcon size={14} color={subtle} weight="fill" />
             </Pressable>
@@ -463,14 +462,13 @@ export function AgentRunBlock({
                     onPress={onRetry}
                     accessibilityRole="button"
                     accessibilityLabel="Retry dispatch"
-                    style={({ pressed }) => ({
+                    style={{
                       position: "absolute",
                       top: 0,
                       left: 0,
                       right: 0,
                       bottom: 0,
-                      opacity: pressed ? 0.7 : 1,
-                    })}
+                    }}
                   />
                 </View>
               ) : null}
@@ -510,15 +508,14 @@ function ToolDrawer({
         onPress={onToggle}
         accessibilityRole="button"
         accessibilityLabel={open ? "Hide tool calls" : "Show tool calls"}
-        style={({ pressed }) => ({
+        style={{
           paddingHorizontal: 14,
           paddingTop: 12,
           paddingBottom: 8,
           flexDirection: "row",
           alignItems: "center",
           gap: 8,
-          opacity: pressed ? 0.7 : 1,
-        })}
+        }}
       >
         <Text
           style={{

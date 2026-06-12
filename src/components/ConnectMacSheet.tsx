@@ -807,14 +807,15 @@ function ScanView(props: {
           onPress={onOpenCode}
           accessibilityRole="button"
           accessibilityLabel="Type pairing code instead"
-          style={({ pressed }) => ({ flex: 1, opacity: pressed ? 0.6 : 1 })}
+          style={{ flex: 1 }}
         >
           <View
             style={{
+              height: 44,
               flexDirection: "row",
               alignItems: "center",
               justifyContent: "center",
-              paddingVertical: 12,
+              paddingHorizontal: 14,
               borderRadius: 12,
               backgroundColor: accent,
             }}
@@ -838,11 +839,11 @@ function ScanView(props: {
         >
           <View
             style={{
+              height: 44,
               flexDirection: "row",
               alignItems: "center",
               justifyContent: "center",
               paddingHorizontal: 14,
-              paddingVertical: 12,
               borderRadius: 12,
               borderWidth: 1,
               borderColor: border,
@@ -928,7 +929,7 @@ function CameraUnavailableView(props: {
       <Pressable
         onPress={props.onUseManual}
         accessibilityRole="button"
-        style={({ pressed }) => ({ marginTop: 12, opacity: pressed ? 0.6 : 1 })}
+        style={{ marginTop: 12 }}
       >
         <Text
           style={{
@@ -1282,7 +1283,7 @@ function ErrorView(props: {
       <Pressable
         onPress={props.onOpenManual}
         accessibilityRole="button"
-        style={({ pressed }) => ({ marginTop: 12, opacity: pressed ? 0.6 : 1 })}
+        style={{ marginTop: 12 }}
       >
         <Text
           style={{
@@ -1371,7 +1372,7 @@ function ManualView(props: {
           onPress={props.onCancel}
           accessibilityRole="button"
           accessibilityLabel="Back to scanning"
-          style={({ pressed }) => ({ flex: 1, opacity: pressed ? 0.7 : 1 })}
+          style={{ flex: 1 }}
         >
           <View
             style={{
@@ -1399,11 +1400,7 @@ function ManualView(props: {
           accessibilityRole="button"
           accessibilityLabel="Pair"
           disabled={props.value.trim().length === 0}
-          style={({ pressed }) => ({
-            flex: 1,
-            opacity:
-              props.value.trim().length === 0 ? 0.4 : pressed ? 0.85 : 1,
-          })}
+          style={{ flex: 1 }}
         >
           <View
             style={{
@@ -1412,6 +1409,7 @@ function ManualView(props: {
               backgroundColor: props.accent,
               alignItems: "center",
               justifyContent: "center",
+              opacity: props.value.trim().length === 0 ? 0.4 : 1,
             }}
           >
             <Text
@@ -1633,7 +1631,7 @@ function DiscoveredView(props: {
         onPress={props.onSkip}
         accessibilityRole="button"
         accessibilityLabel="Use the QR code instead"
-        style={({ pressed }) => ({ marginTop: 14, opacity: pressed ? 0.6 : 1 })}
+        style={{ marginTop: 14 }}
       >
         <Text
           style={{

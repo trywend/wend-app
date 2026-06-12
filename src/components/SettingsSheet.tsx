@@ -735,10 +735,7 @@ function SettingsSheetMounted({
             accessibilityRole="button"
             accessibilityLabel="Log out"
             android_ripple={{ color: "rgba(255,255,255,0.18)" }}
-            style={({ pressed }) => ({
-              marginTop: 8,
-              opacity: pressed ? 0.85 : 1,
-            })}
+            style={{ marginTop: 8 }}
           >
             <View
               style={{
