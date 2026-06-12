@@ -267,6 +267,11 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
         : "code",
   );
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  /** Which flow produced the current error. A LAN-pair failure offers
+   *  "Try again" (re-attempt against the same discovered daemon, no
+   *  re-scan) + "Scan QR instead"; QR/code/manual failures keep the
+   *  classic "Scan again" + "Paste the JSON instead" pair. */
+  const [errorSource, setErrorSource] = useState<"lan" | "generic">("generic");
   const [pairedHost, setPairedHost] = useState<string | null>(null);
   const [manualText, setManualText] = useState<string>("");
   /** The Mac surfaced by Bonjour. Carried into the "discovered" and
@@ -285,15 +290,19 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
    *  finishes parsing the QR. */
   const { getToken, isSignedIn } = useAuth();
 
-  // Request permission on mount if undecided. Don't auto-request again
-  // if the user explicitly denied — they can tap "Open Settings" in the
-  // denied state to grant it via the system app.
+  // Request permission only once the user is actually IN the scanning
+  // mode (chose it, or Bonjour fell through to it). Requesting on mount
+  // shoved the system camera dialog into the middle of the LAN-pair
+  // flow, which never needs the camera. Don't auto-request again if the
+  // user explicitly denied — they can tap "Open Settings" in the denied
+  // state to grant it via the system app.
   useEffect(() => {
+    if (mode !== "scanning") return;
     if (!permission) return;
     if (!permission.granted && permission.canAskAgain) {
       void requestPermission();
     }
-  }, [permission, requestPermission]);
+  }, [mode, permission, requestPermission]);
 
   // Re-query the permission when the app returns from background — the
   // user may have granted camera access via "Open Settings". Without
@@ -322,6 +331,7 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
             : "code",
       );
       setErrorMsg(null);
+      setErrorSource("generic");
       setPairedHost(null);
       setManualText("");
       setDiscovered(null);
@@ -366,6 +376,7 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
     const parsed = parsePairingString(raw);
     if (!parsed.ok) {
       setErrorMsg(parsed.error);
+      setErrorSource("generic");
       setMode("error");
       // Keep the lock — explicit "Scan again" releases it.
       return;
@@ -394,6 +405,7 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
         // can retry from Settings" and the Mac shows up in dispatch
         // but not in the device list.
         setErrorMsg(adoptError);
+        setErrorSource("generic");
         setMode("error");
         return;
       }
@@ -409,6 +421,16 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
     setErrorMsg(null);
     setMode(cameraAvailable ? "scanning" : "code");
     lockRef.current = false;
+  }
+
+  /** From a LAN-pair error: abandon the LAN path and switch to the
+   *  canonical QR flow. Clears the stale error so it can't leak into
+   *  the scanning view. */
+  function scanInstead() {
+    setErrorMsg(null);
+    setErrorSource("generic");
+    lockRef.current = false;
+    setMode(cameraAvailable ? "scanning" : "code");
   }
 
   function trySubmitManual() {
@@ -431,6 +453,7 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
     });
     if (startRes.status === "error") {
       setErrorMsg(startRes.reason);
+      setErrorSource("lan");
       setMode("error");
       return;
     }
@@ -447,6 +470,7 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
             ? poll.reason
             : "Mac is still waiting — try again.";
       setErrorMsg(reason);
+      setErrorSource("lan");
       setMode("error");
       return;
     }
@@ -483,6 +507,7 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
       );
       if (adoptError) {
         setErrorMsg(adoptError);
+        setErrorSource("lan");
         setMode("error");
         return;
       }
@@ -649,6 +674,37 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
               subtle={subtle}
               accent={accent}
             />
+          ) : mode === "success" ? (
+            <SuccessView host={pairedHost ?? "your Mac"} accent={accent} ink={ink} subtle={subtle} />
+          ) : mode === "error" ? (
+            // Error renders BEFORE any camera/permission gate — a failed
+            // LAN pair must show its own error, never bounce through the
+            // permission or scanner views with a stale message.
+            <ErrorView
+              message={errorMsg ?? "Couldn't read that code."}
+              retryLabel={errorSource === "lan" ? "Try again" : "Scan again"}
+              onRetry={
+                errorSource === "lan" && discovered !== null
+                  ? () => void approveLanPair(discovered)
+                  : tryAgain
+              }
+              secondaryLabel={
+                errorSource === "lan" ? "Scan QR instead" : "Paste the JSON instead"
+              }
+              onSecondary={
+                errorSource === "lan"
+                  ? scanInstead
+                  : () => {
+                      setManualText("");
+                      setMode("manual");
+                    }
+              }
+              ink={ink}
+              subtle={subtle}
+              border={border}
+              accent={accent}
+              accentOn={accentOn}
+            />
           ) : !cameraAvailable && mode === "scanning" ? (
             <CameraUnavailableView
               detail={cameraLoadError ?? "Camera module not linked."}
@@ -660,13 +716,13 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
               accent={accent}
               accentOn={accentOn}
             />
-          ) : cameraAvailable && !permission ? (
+          ) : mode === "scanning" && !permission ? (
             <Centered>
               <Text style={{ color: subtle, fontFamily: "Inter-Regular", fontSize: 14 }}>
                 Checking camera permission…
               </Text>
             </Centered>
-          ) : cameraAvailable && !permission?.granted ? (
+          ) : mode === "scanning" && !permission?.granted ? (
             <DeniedView
               canAskAgain={permission?.canAskAgain ?? false}
               onAsk={() => void requestPermission()}
@@ -690,28 +746,13 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
               border={border}
               accent={accent}
             />
-          ) : mode === "success" ? (
-            <SuccessView host={pairedHost ?? "your Mac"} accent={accent} ink={ink} subtle={subtle} />
-          ) : mode === "error" ? (
-            <ErrorView
-              message={errorMsg ?? "Couldn't read that code."}
-              onRetry={tryAgain}
-              onOpenManual={() => {
-                setManualText("");
-                setMode("manual");
-              }}
-              ink={ink}
-              subtle={subtle}
-              border={border}
-              accent={accent}
-              accentOn={accentOn}
-            />
           ) : mode === "code" ? (
             <CodeView
               onSubmit={async (digits) => {
                 const out = await redeemCode(digits, getToken);
                 if (!out.ok) {
                   setErrorMsg(out.error);
+                  setErrorSource("generic");
                   setMode("error");
                   return;
                 }
@@ -1250,8 +1291,10 @@ function SuccessView({
 
 function ErrorView(props: {
   message: string;
+  retryLabel: string;
   onRetry: () => void;
-  onOpenManual: () => void;
+  secondaryLabel: string;
+  onSecondary: () => void;
   ink: string;
   subtle: string;
   border: string;
@@ -1298,13 +1341,13 @@ function ErrorView(props: {
         {props.message}
       </Text>
       <PillButton
-        label="Scan again"
+        label={props.retryLabel}
         onPress={props.onRetry}
         bg={props.accent}
         fg={props.accentOn}
       />
       <Pressable
-        onPress={props.onOpenManual}
+        onPress={props.onSecondary}
         accessibilityRole="button"
         style={{ marginTop: 12 }}
       >
@@ -1316,7 +1359,7 @@ function ErrorView(props: {
             textDecorationLine: "underline",
           }}
         >
-          Paste the JSON instead
+          {props.secondaryLabel}
         </Text>
       </Pressable>
     </Centered>

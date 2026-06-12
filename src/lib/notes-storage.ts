@@ -106,6 +106,9 @@ export interface PersistedRun {
   /** Deliverable URLs the run produced (PRs, dashboards). Populated by
    *  cloud catch-up when the backend reports them. */
   links?: string[];
+  /** stderr lines claude emitted during a run that still succeeded —
+   *  rendered as a collapsed "N warnings" line, never as a failure. */
+  warnings?: string[];
   error: string | null;
   /** User text typed after this run — becomes the prompt for the NEXT run. */
   followUp: string;

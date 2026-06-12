@@ -108,15 +108,28 @@ function AuthGate() {
     }
   }, [status, segments, router]);
 
+  // While auth is unresolved, render nothing — the splash screen is still
+  // up (RootLayout keeps it visible until BOTH fonts and auth are ready).
+  // Mounting <Slot/> here would mount (app)'s layout and let its onboarding
+  // redirect fire before we know the user is signed out, which flashed the
+  // Connect-your-Mac screen on first cold start.
+  if (status === "loading") return null;
+
   return <Slot />;
 }
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts(fontMap);
+  const authStatus = useAuthStore((s) => s.status);
 
+  // Splash stays up until BOTH fonts and auth status are resolved — hiding
+  // on fonts alone exposed a frame of the wrong route group while Clerk was
+  // still restoring the session.
   useEffect(() => {
-    if (fontsLoaded || fontError) void SplashScreen.hideAsync();
-  }, [fontsLoaded, fontError]);
+    if ((fontsLoaded || fontError) && authStatus !== "loading") {
+      void SplashScreen.hideAsync();
+    }
+  }, [fontsLoaded, fontError, authStatus]);
 
   if (!fontsLoaded && !fontError) return null;
 

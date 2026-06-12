@@ -144,6 +144,11 @@ interface InflightRun {
   costUsd: number;
   status: "running" | "done" | "error";
   error: string | null;
+  /** stderr lines accumulated during the run. Warnings, not failures. */
+  warnings: string[];
+  /** True while the Mac stream dropped and useDispatch is re-attaching via
+   *  the daemon's resume endpoint — header shows "Reconnecting…". */
+  reconnecting: boolean;
   /** Smart routing — the project the daemon resolved this run into. Populated
    *  by the first `route` event from the SSE stream. */
   routeName: string | null;
@@ -557,6 +562,8 @@ export default function HomeScreen() {
         status: "error",
         error:
           "No Mac paired. Open Settings → Connectivity → Mac and pair from the Wend.app QR.",
+        warnings: [],
+        reconnecting: false,
       });
       setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
       return;
@@ -604,6 +611,8 @@ export default function HomeScreen() {
       costUsd: 0,
       status: "running",
       error: null,
+      warnings: [],
+      reconnecting: false,
       routeName: null,
       routeCwd: null,
       routeSource: null,
@@ -612,6 +621,7 @@ export default function HomeScreen() {
     let accumulated = "";
     const tools: string[] = [];
     const toolCalls: Array<{ name: string; input?: unknown }> = [];
+    const warnings: string[] = [];
     let resolvedSessionId: string | null = sessionId;
     let resolvedDuration = 0;
     let resolvedCost = 0;
@@ -645,6 +655,13 @@ export default function HomeScreen() {
             body: e.message,
           });
         }
+        // Any event other than "reconnecting" means the stream is flowing
+        // again — drop the banner. No-op (same object back) when not set.
+        if (e.type !== "reconnecting") {
+          setInflight((s) =>
+            s && s.reconnecting ? { ...s, reconnecting: false } : s,
+          );
+        }
         if (e.type === "text") {
           accumulated += e.text;
           setInflight((s) =>
@@ -677,13 +694,22 @@ export default function HomeScreen() {
               : s,
           );
           if (!noteCwd && e.source === "auto") setCwd(e.cwd);
+        } else if (e.type === "stderr") {
+          // stderr is a warning, never a failure. Accumulate; if the run
+          // later errors without a better message, the last line becomes
+          // the error detail.
+          warnings.push(e.message);
+          setInflight((s) => (s ? { ...s, warnings: [...warnings] } : s));
+        } else if (e.type === "reconnecting") {
+          setInflight((s) => (s ? { ...s, reconnecting: true } : s));
         } else if (e.type === "result") {
           resolvedSessionId = e.sessionId || resolvedSessionId;
           resolvedDuration = e.durationMs;
           resolvedCost = e.costUsd;
           if (e.isError) {
             didError = true;
-            resolvedError = "Claude reported an error result";
+            resolvedError =
+              warnings[warnings.length - 1] ?? "Claude reported an error result";
           }
           setInflight((s) =>
             s
@@ -699,9 +725,10 @@ export default function HomeScreen() {
           );
         } else if (e.type === "error") {
           didError = true;
-          resolvedError = e.message;
+          resolvedError =
+            e.message || warnings[warnings.length - 1] || "Dispatch failed";
           setInflight((s) =>
-            s ? { ...s, status: "error", error: e.message } : s,
+            s ? { ...s, status: "error", error: resolvedError } : s,
           );
         } else if (e.type === "done") {
           // Promote inflight to a persisted run regardless of success/error —
@@ -720,6 +747,7 @@ export default function HomeScreen() {
             costUsd: resolvedCost,
             toolUses: [...tools],
             toolCalls: [...toolCalls],
+            warnings: warnings.length ? [...warnings] : undefined,
             error: resolvedError,
             followUp: "",
             createdAt: Date.now(),
@@ -1173,6 +1201,7 @@ export default function HomeScreen() {
               onStop={handleStop}
               projectName={inflight.routeName || projectBasename(noteCwd)}
               onOpenFile={(path) => openRunFile(path, inflight.toolCalls)}
+              reconnecting={inflight.reconnecting}
             />
           ) : null}
         </ScrollView>
@@ -1997,6 +2026,7 @@ function persistedRunToBlockState(run: PersistedRun): AgentRunBlockState {
     toolUses: run.toolUses,
     toolCalls: run.toolCalls,
     links: run.links,
+    warnings: run.warnings,
     durationMs: run.durationMs,
     costUsd: run.costUsd,
     error: run.error,
@@ -2010,6 +2040,7 @@ function inflightToBlockState(run: InflightRun): AgentRunBlockState {
     response: run.response,
     toolUses: run.toolUses,
     toolCalls: run.toolCalls,
+    warnings: run.warnings,
     durationMs: run.durationMs,
     costUsd: run.costUsd,
     error: run.error,

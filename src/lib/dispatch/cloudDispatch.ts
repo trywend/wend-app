@@ -156,11 +156,12 @@ function runOneAttempt(
           return;
         }
         if (event === "stderr") {
+          // Warning, not error — stderr noise must not fail a successful run.
           try {
             const text = JSON.parse(data);
-            args.onEvent({ type: "error", message: typeof text === "string" ? text : data });
+            args.onEvent({ type: "stderr", message: typeof text === "string" ? text : data });
           } catch {
-            args.onEvent({ type: "error", message: data });
+            args.onEvent({ type: "stderr", message: data });
           }
           return;
         }

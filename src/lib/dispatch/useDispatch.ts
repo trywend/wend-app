@@ -21,6 +21,7 @@
  * event shape stays — callers won't have to change.
  */
 import { useCallback, useRef, useState } from "react";
+import { AppState } from "react-native";
 import { fetch as expoFetch } from "expo/fetch";
 import { useAuth } from "@clerk/clerk-expo";
 
@@ -63,6 +64,19 @@ export type DispatchEvent =
       name: string;
       confidence: number;
       source: "auto" | "pinned" | "fallback" | "cloud";
+    }
+  | {
+      /** A line of claude's stderr. Usually harmless noise (hook failures,
+       *  deprecation warnings) — consumers accumulate these as warnings and
+       *  must NOT treat them as run failure. */
+      type: "stderr";
+      message: string;
+    }
+  | {
+      /** Mac stream dropped mid-run; the hook is retrying against the
+       *  daemon's resume endpoint. Purely informational — followed by
+       *  normal events on success or an `error` on give-up. */
+      type: "reconnecting";
     }
   | { type: "error"; message: string }
   | { type: "done" };
@@ -224,6 +238,30 @@ export function useDispatch(): UseDispatchResult {
     // pip. We deliberately set this AFTER the early-return path above — an
     // un-configured daemon shouldn't flip the pip on at all.
     useDispatchStore.getState().setRunningNoteId(args.noteId ?? null);
+
+    // Resume-protocol bookkeeping. Daemons that speak the protocol stamp
+    // every SSE frame with `id: <seq>` and put a runId in the route event;
+    // when the socket dies mid-run ("Software caused connection abort")
+    // we re-attach via GET /run/<runId>/stream?from=<lastSeq> instead of
+    // failing a run that's still alive on the Mac. Older daemons never
+    // surface a runId, so the resume branch is skipped entirely.
+    const stream = { runId: null as string | null, lastSeq: 0, sawResult: false };
+    const handleFrame = (frame: string) => {
+      const seq = frameSeq(frame);
+      if (seq !== null) {
+        if (seq <= stream.lastSeq) return; // replayed duplicate
+        stream.lastSeq = seq;
+      }
+      parseFrame(
+        frame,
+        (e) => {
+          if (e.type === "result") stream.sawResult = true;
+          args.onEvent(e);
+        },
+        { onRunId: (id) => { stream.runId = id; } },
+      );
+    };
+
     try {
       // Upload attachments first (if any) so the daemon has them staged
       // before claude spawns. Failures are non-fatal — we drop the file
@@ -283,31 +321,58 @@ export function useDispatch(): UseDispatchResult {
           type: "error",
           message: `Daemon returned ${res.status} ${res.statusText || ""}`.trim(),
         });
-        args.onEvent({ type: "done" });
         return;
       }
       if (!res.body) {
         args.onEvent({ type: "error", message: "Daemon returned no body" });
-        args.onEvent({ type: "done" });
         return;
       }
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        // SSE frames are separated by a blank line.
-        const frames = buffer.split("\n\n");
-        buffer = frames.pop() ?? "";
-        for (const frame of frames) parseFrame(frame, args.onEvent);
+      let streamError: string | null = null;
+      try {
+        await readSseStream(res.body, handleFrame);
+      } catch (err) {
+        if (controller.signal.aborted) {
+          args.onEvent({ type: "error", message: "Cancelled" });
+          return;
+        }
+        streamError = err instanceof Error ? err.message : String(err);
       }
-      // Flush any final frame the daemon wrote without a trailing blank line.
-      if (buffer.trim()) parseFrame(buffer, args.onEvent);
+
+      // Clean finish — claude's result frame arrived before the stream
+      // ended, so any trailing read error is just the socket closing.
+      if (stream.sawResult) return;
+
+      if (!stream.runId) {
+        // Daemon predates the resume protocol — behave exactly as before.
+        if (streamError) args.onEvent({ type: "error", message: streamError });
+        return;
+      }
+
+      // Stream ended abnormally (error or EOF) without a result and
+      // without a user abort: the run is likely still alive on the Mac.
+      // Reconnect to the resume endpoint with backoff instead of erroring.
+      const recovered = await resumeRunStream({
+        runId: stream.runId,
+        getLastSeq: () => stream.lastSeq,
+        sawResult: () => stream.sawResult,
+        handleFrame,
+        baseUrl: creds.url,
+        token: creds.token,
+        refresh: resolved.refresh,
+        signal: controller.signal,
+        onEvent: args.onEvent,
+      });
+      if (controller.signal.aborted) {
+        args.onEvent({ type: "error", message: "Cancelled" });
+        return;
+      }
+      if (!recovered) {
+        args.onEvent({
+          type: "error",
+          message: streamError ?? "Connection to your Mac was lost.",
+        });
+      }
     } catch (err) {
       if (controller.signal.aborted) {
         args.onEvent({ type: "error", message: "Cancelled" });
@@ -446,6 +511,124 @@ async function dispatchCloud(
   }
 }
 
+/* ───── SSE stream reading + resume protocol ─────────────────────────── */
+
+/** Backoff schedule for resume attempts. After the last window we give up
+ *  and surface the original stream error. */
+const RESUME_BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 15_000];
+
+type SseBody = {
+  getReader(): {
+    read(): Promise<{ done: boolean; value?: Uint8Array }>;
+  };
+};
+
+/** Read an SSE body to EOF, handing each blank-line-delimited frame to
+ *  `handleFrame`. Throws whatever the underlying reader throws. */
+async function readSseStream(
+  body: SseBody,
+  handleFrame: (frame: string) => void,
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+    for (const frame of frames) handleFrame(frame);
+  }
+  // Flush any final frame written without a trailing blank line.
+  if (buffer.trim()) handleFrame(buffer);
+}
+
+/** Extract the SSE `id: <seq>` line from a raw frame, if present. */
+function frameSeq(rawFrame: string): number | null {
+  for (const line of rawFrame.split("\n")) {
+    if (line.startsWith("id:")) {
+      const n = Number(line.slice(3).trim());
+      return Number.isFinite(n) && n > 0 ? n : null;
+    }
+  }
+  return null;
+}
+
+/** Wait `ms`, but resolve early if the app returns to the foreground (the
+ *  user is looking — retry now) or the dispatch is aborted. */
+function waitForRetryWindow(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      appStateSub.remove();
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    const appStateSub = AppState.addEventListener("change", (state) => {
+      if (state === "active") finish();
+    });
+    signal.addEventListener("abort", finish);
+  });
+}
+
+/** Re-attach to a dropped Mac run via the daemon's resume endpoint:
+ *
+ *    GET <daemonUrl>/run/<runId>/stream?from=<lastSeq>&t=<token>
+ *
+ *  Replays frames with seq > from, then live-tails until the run ends.
+ *  404 = unknown/expired run, 410 = requested seq evicted — both are
+ *  unrecoverable, so we stop immediately. Network failures walk the
+ *  backoff schedule; the daemon URL is re-resolved before each attempt
+ *  because the tunnel may have rotated with the same network blip that
+ *  killed the stream. Returns true iff the run's result frame arrived. */
+async function resumeRunStream(ctx: {
+  runId: string;
+  getLastSeq: () => number;
+  sawResult: () => boolean;
+  handleFrame: (frame: string) => void;
+  baseUrl: string;
+  token: string;
+  refresh: () => Promise<string | null>;
+  signal: AbortSignal;
+  onEvent: (e: DispatchEvent) => void;
+}): Promise<boolean> {
+  let url = ctx.baseUrl;
+  for (const backoffMs of RESUME_BACKOFF_MS) {
+    // Re-announce before every attempt — a partially successful attempt
+    // may have streamed frames that cleared the consumer's banner.
+    ctx.onEvent({ type: "reconnecting" });
+    await waitForRetryWindow(backoffMs, ctx.signal);
+    if (ctx.signal.aborted) return false;
+
+    const fresh = await ctx.refresh().catch(() => null);
+    if (fresh && fresh.length > 0) url = fresh;
+
+    const target =
+      `${url.replace(/\/$/, "")}/run/${encodeURIComponent(ctx.runId)}/stream` +
+      `?from=${ctx.getLastSeq()}&t=${encodeURIComponent(ctx.token)}`;
+    try {
+      const res = await expoFetch(target, { signal: ctx.signal });
+      if (res.status === 404 || res.status === 410) return false;
+      if (!res.ok || !res.body) continue;
+      await readSseStream(res.body, ctx.handleFrame);
+      if (ctx.sawResult()) return true;
+      // Tailed to EOF without a result — the connection dropped again.
+    } catch {
+      if (ctx.signal.aborted) return false;
+    }
+  }
+  return ctx.sawResult();
+}
+
 /* ───── Frame parser ─────────────────────────────────────────────────── */
 
 /**
@@ -457,7 +640,11 @@ async function dispatchCloud(
  * The spike daemon emits Claude's stream-json events directly inside `data:`,
  * plus a final `event: done` frame. We unwrap to the typed events above.
  */
-function parseFrame(rawFrame: string, onEvent: (e: DispatchEvent) => void) {
+function parseFrame(
+  rawFrame: string,
+  onEvent: (e: DispatchEvent) => void,
+  hooks?: { onRunId?: (runId: string) => void },
+) {
   const lines = rawFrame.split("\n");
   let eventType = "message";
   const dataParts: string[] = [];
@@ -470,16 +657,18 @@ function parseFrame(rawFrame: string, onEvent: (e: DispatchEvent) => void) {
   if (!data) return;
 
   if (eventType === "stderr") {
-    // Surface stderr as an error event — usually noise during normal runs,
-    // but if Claude blows up we want to see it.
+    // Surface stderr as a WARNING, never an error — claude routinely emits
+    // harmless noise here (hook failures, deprecation chatter) on runs that
+    // succeed. Consumers accumulate these and only promote the last line to
+    // an error detail if the run actually fails.
     try {
       const text = JSON.parse(data);
       onEvent({
-        type: "error",
+        type: "stderr",
         message: typeof text === "string" ? text : data,
       });
     } catch {
-      onEvent({ type: "error", message: data });
+      onEvent({ type: "stderr", message: data });
     }
     return;
   }
@@ -493,6 +682,9 @@ function parseFrame(rawFrame: string, onEvent: (e: DispatchEvent) => void) {
     // frame. Shape: { cwd, name, confidence, source }.
     try {
       const r = JSON.parse(data);
+      if (typeof r.runId === "string" && r.runId.length > 0) {
+        hooks?.onRunId?.(r.runId);
+      }
       if (typeof r.cwd === "string" && typeof r.name === "string") {
         onEvent({
           type: "route",

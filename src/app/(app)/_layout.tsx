@@ -15,6 +15,7 @@
 import { useEffect } from "react";
 import { Stack, useRouter, useSegments } from "expo-router";
 
+import { useAuthStore } from "@/store/authSlice";
 import { useDaemonStore } from "@/store/daemonSlice";
 import { useOnboardingStore } from "@/store/onboardingSlice";
 
@@ -22,6 +23,7 @@ export default function AppLayout() {
   const router = useRouter();
   const segments = useSegments();
 
+  const authStatus = useAuthStore((s) => s.status);
   const deviceId = useDaemonStore((s) => s.deviceId);
   const token = useDaemonStore((s) => s.token);
   const pairSkipped = useOnboardingStore((s) => s.pairSkipped);
@@ -35,6 +37,10 @@ export default function AppLayout() {
   const onOnboarding = (segments as readonly string[])[1] === "onboarding";
 
   useEffect(() => {
+    // Onboarding redirects are meaningless for a signed-out (or still
+    // resolving) session — the root AuthGate is about to replace this whole
+    // group with sign-in. Firing here first caused the onboarding flash.
+    if (authStatus !== "authed") return;
     // Send unpaired, never-skipped users to onboarding.
     if (!paired && !pairSkipped && !onOnboarding) {
       router.replace("/(app)/onboarding");
@@ -44,7 +50,7 @@ export default function AppLayout() {
     if ((paired || pairSkipped) && onOnboarding) {
       router.replace("/(app)");
     }
-  }, [paired, pairSkipped, onOnboarding, router]);
+  }, [authStatus, paired, pairSkipped, onOnboarding, router]);
 
   return <Stack screenOptions={{ headerShown: false }} />;
 }

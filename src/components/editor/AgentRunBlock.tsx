@@ -73,6 +73,9 @@ export interface AgentRunBlockState {
   toolCalls?: ToolCall[];
   /** Deliverable URLs persisted on the run (cloud backend). */
   links?: string[];
+  /** stderr lines from a run that still succeeded. Rendered as a subtle
+   *  collapsed "N warnings" one-liner, never with the error treatment. */
+  warnings?: string[];
   durationMs: number;
   costUsd: number;
   error: string | null;
@@ -89,6 +92,9 @@ export interface AgentRunBlockProps {
   /** Called when the user taps a file path in the markdown response. The
    *  parent screen owns the FileViewerModal state and shows it on demand. */
   onOpenFile?: (path: string) => void;
+  /** The Mac stream dropped and the dispatcher is re-attaching — shows
+   *  "Reconnecting…" in the header while the run keeps going on the Mac. */
+  reconnecting?: boolean;
 }
 
 export function AgentRunBlock({
@@ -97,6 +103,7 @@ export function AgentRunBlock({
   projectName,
   onRetry,
   onOpenFile,
+  reconnecting,
 }: AgentRunBlockProps) {
   const { tokens } = useTheme();
   const running = state.status === "running";
@@ -118,6 +125,9 @@ export function AgentRunBlock({
   const [bodyOpen, setBodyOpen] = useState(false);
   // Tool drawer fold state. Closed by default to keep the body the focus.
   const [toolsOpen, setToolsOpen] = useState(false);
+  // Warnings fold state — the "N warnings" one-liner expands on tap.
+  const [warningsOpen, setWarningsOpen] = useState(false);
+  const warnings = state.warnings ?? [];
 
   // Running: force-open so streaming text is visible.
   // Error: force-open so the error message + retry are visible.
@@ -276,6 +286,19 @@ export function AgentRunBlock({
 
           {/* Spacer */}
           <View style={{ flex: 1 }} />
+
+          {/* Running + dropped stream: re-attach status. */}
+          {running && reconnecting ? (
+            <Text
+              style={{
+                fontFamily: "Inter-Medium",
+                fontSize: 11.5,
+                color: tertiary,
+              }}
+            >
+              Reconnecting…
+            </Text>
+          ) : null}
 
           {/* Done: cost/duration in header, then caret. */}
           {done && (state.durationMs > 0 || state.costUsd > 0) ? (
@@ -481,6 +504,56 @@ export function AgentRunBlock({
             </View>
           ) : null}
         </Animated.View>
+      ) : null}
+
+      {/* ─── Warnings (done runs only) — subtle one-liner, expands on tap.
+          Deliberately NOT the red error treatment: these are stderr lines
+          from a run that succeeded. ─────────────────────────────────────── */}
+      {done && warnings.length > 0 ? (
+        <View>
+          <Pressable
+            onPress={() => setWarningsOpen((v) => !v)}
+            accessibilityRole="button"
+            accessibilityLabel={warningsOpen ? "Hide warnings" : "Show warnings"}
+            style={{
+              paddingHorizontal: 14,
+              paddingTop: 2,
+              paddingBottom: warningsOpen ? 6 : 12,
+            }}
+          >
+            <Text
+              style={{
+                fontFamily: "Inter-Medium",
+                fontSize: 11.5,
+                color: tertiary,
+                letterSpacing: -0.1,
+              }}
+            >
+              {`${warnings.length} ${warnings.length === 1 ? "warning" : "warnings"}`}
+            </Text>
+          </Pressable>
+          {warningsOpen ? (
+            <Animated.View
+              entering={FadeIn.duration(160)}
+              style={{ paddingHorizontal: 14, paddingBottom: 12 }}
+            >
+              {warnings.map((w, i) => (
+                <Text
+                  key={i}
+                  style={{
+                    fontFamily: "JetBrainsMono",
+                    fontSize: 11,
+                    lineHeight: 16,
+                    color: tertiary,
+                    marginTop: i === 0 ? 0 : 4,
+                  }}
+                >
+                  {w}
+                </Text>
+              ))}
+            </Animated.View>
+          ) : null}
+        </View>
       ) : null}
     </View>
   );
