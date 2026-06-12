@@ -23,6 +23,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import {
+  AppState,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -39,8 +40,11 @@ import { useAuth } from "@clerk/clerk-expo";
 // user to rebuild (`npx expo run:android` / `npx expo run:ios`).
 type BarcodeScanningResult = { data: string };
 type CameraPermission = { granted: boolean; canAskAgain: boolean };
+// createPermissionHook tuple: [status, request, get] — the third
+// element re-queries the OS without prompting and updates hook state.
 type UseCameraPermissionsHook = () => [
   CameraPermission | null,
+  () => Promise<CameraPermission>,
   () => Promise<CameraPermission>,
 ];
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -243,8 +247,13 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
   // When the native module isn't linked into this dev client build, the
   // hook is null and we skip the permission flow entirely — the user
   // sees a "rebuild" notice and the OTP path remains usable.
-  const cameraHook = useCameraPermissions ?? (() => [null, async () => ({ granted: false, canAskAgain: false })] as const);
-  const [permission, requestPermission] = cameraHook();
+  const cameraHook =
+    useCameraPermissions ??
+    (() => {
+      const denied = async () => ({ granted: false, canAskAgain: false });
+      return [null, denied, denied] as const;
+    });
+  const [permission, requestPermission, getPermission] = cameraHook();
   // Boot into Bonjour discovery when the native module is linked. If
   // not, skip straight to the QR scanner (or OTP if no camera either).
   // Falls through to QR after a short timeout if nothing surfaces — the
@@ -285,6 +294,20 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
       void requestPermission();
     }
   }, [permission, requestPermission]);
+
+  // Re-query the permission when the app returns from background — the
+  // user may have granted camera access via "Open Settings". Without
+  // this the denied view sticks until the sheet is closed and reopened.
+  // The render gate below `mode` falls through to the scanner on its
+  // own once `permission.granted` flips (mode is already "scanning"
+  // whenever the denied view can be visible).
+  useEffect(() => {
+    if (!cameraAvailable) return;
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") void getPermission();
+    });
+    return () => sub.remove();
+  }, [getPermission]);
 
   // Reset to the initial mode whenever the sheet re-opens. The initial
   // mode is `discovering` when Bonjour is linked (typical iOS dev
