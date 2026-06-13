@@ -65,25 +65,11 @@ import {
   type RecentFilePath,
 } from "@/lib/notes/useRecentFilePaths";
 import type { PersistedRun } from "@/lib/notes-storage";
-
-/* ─── Hardcoded commands (Phase 2) ─────────────────────────────────────── */
-
-type CommandIconKind = "terminal" | "filetext" | "rocket";
-
-interface PaletteCommand {
-  /** Slash-prefixed name as the user types it. */
-  name: string;
-  description: string;
-  icon: CommandIconKind;
-}
-
-const COMMANDS: PaletteCommand[] = [
-  { name: "/fix", description: "Find and fix a bug in the codebase", icon: "terminal" },
-  { name: "/summarize", description: "Summarize a thread, doc, or run", icon: "filetext" },
-  { name: "/deploy", description: "Kick off a deploy to staging", icon: "rocket" },
-  { name: "/explain", description: "Explain a file or symbol in plain English", icon: "filetext" },
-  { name: "/test", description: "Generate or run tests", icon: "terminal" },
-];
+import {
+  PALETTE_COMMANDS as COMMANDS,
+  type CommandIconKind,
+  type PaletteCommand,
+} from "@/lib/dispatch/commands";
 
 const SUGGESTION_CHIPS = ["redirect bug", "auth flow"];
 
@@ -95,6 +81,9 @@ export interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
   onSelectNote: (noteId: string) => void;
+  /** Inject a command token (`/fix`) inline at the editor cursor. The palette
+   *  closes; the user types the argument after it and dispatches as usual. */
+  onInjectCommand: (name: string) => void;
   /** PersistedRuns from the current note — used to derive recent file paths.
    *  Optional; when omitted (or empty) the Files section just shows nothing. */
   runs?: PersistedRun[];
@@ -110,6 +99,7 @@ export function CommandPalette(props: CommandPaletteProps): React.JSX.Element | 
 function CommandPaletteMounted({
   onClose,
   onSelectNote,
+  onInjectCommand,
   runs = [],
 }: CommandPaletteProps) {
   const { tokens } = useTheme();
@@ -192,9 +182,8 @@ function CommandPaletteMounted({
   const showNotes = filter === "all" || filter === "notes";
 
   const handleSelectCommand = (cmd: PaletteCommand) => {
-    // Phase 2 stub. Real wiring lands when dispatch supports command prefixes.
-    // eslint-disable-next-line no-console
-    console.log("[wend] command selected", cmd.name);
+    onClose();
+    onInjectCommand(cmd.name);
   };
 
   const handleSelectFile = (p: RecentFilePath) => {

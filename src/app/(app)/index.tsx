@@ -77,6 +77,7 @@ import { useNoteEditor } from "@/lib/notes/useNoteEditor";
 import { useNotesList } from "@/lib/notes/useNotesList";
 import { useDispatch, type DispatchEvent } from "@/lib/dispatch/useDispatch";
 import { useResolvedDaemonURL } from "@/lib/dispatch/useResolvedDaemonURL";
+import { splitLeadingCommand } from "@/lib/dispatch/commands";
 import {
   archiveNote,
   createNote,
@@ -570,7 +571,11 @@ export default function HomeScreen() {
       return;
     }
 
-    const prompt = candidate;
+    // A note leading with a palette command dispatches that segment in
+    // isolation — its system prompt frames the run (applied in buildPrompt)
+    // and the rest of the note is excluded from this send.
+    const leadingCommand = splitLeadingCommand(candidate);
+    const prompt = leadingCommand ? leadingCommand.segment : candidate;
 
     // Auto-title: when the user sends an untitled first dispatch, fire a
     // small parallel Claude call to summarize the body into a 2–4 word
@@ -810,6 +815,26 @@ export default function HomeScreen() {
     } else {
       if (lastRunIdx < 0) return;
       const next = insertMarkdown(lastFollowUp, followUpSelection, action);
+      updateRunFollowUp(lastRunIdx, next.text);
+      setFollowUpSelection({ start: next.cursor, end: next.cursor });
+      followUpRefs.current[lastRunIdx]?.focus();
+    }
+  }
+
+  /* ─── Command injection ─────────────────────────────────────────────
+     Selecting a palette command inserts `/fix ` at the cursor of the active
+     dispatch field. The user types the argument after it; on Send the leading
+     command segment fires in isolation with the command's system prompt. */
+  function injectCommand(name: string) {
+    const snippet = `${name} `;
+    if (isFirstSend) {
+      const next = insertText(body, bodySelection, snippet);
+      setBody(next.text);
+      setBodySelection({ start: next.cursor, end: next.cursor });
+      bodyRef.current?.focus();
+    } else {
+      if (lastRunIdx < 0) return;
+      const next = insertText(lastFollowUp, followUpSelection, snippet);
       updateRunFollowUp(lastRunIdx, next.text);
       setFollowUpSelection({ start: next.cursor, end: next.cursor });
       followUpRefs.current[lastRunIdx]?.focus();
@@ -1721,6 +1746,7 @@ export default function HomeScreen() {
         open={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
         onSelectNote={handleSelectNote}
+        onInjectCommand={injectCommand}
         runs={runs}
       />
 
@@ -2090,6 +2116,17 @@ const MARKDOWN_ACTIONS: Record<string, MarkdownAction> = {
 interface InsertResult {
   text: string;
   cursor: number;
+}
+
+function insertText(
+  current: string,
+  selection: { start: number; end: number },
+  snippet: string,
+): InsertResult {
+  const start = Math.max(0, Math.min(selection.start, current.length));
+  const end = Math.max(start, Math.min(selection.end, current.length));
+  const text = current.slice(0, start) + snippet + current.slice(end);
+  return { text, cursor: start + snippet.length };
 }
 
 function insertMarkdown(

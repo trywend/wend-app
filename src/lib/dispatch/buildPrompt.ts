@@ -62,9 +62,11 @@
  *     → intent=slash, verbatim passthrough
  */
 
+import { parseCommand } from "@/lib/dispatch/commands";
+
 export interface BuiltPrompt {
   prompt: string;
-  intent: "slash" | "ticket" | "question" | "task" | "idea";
+  intent: "command" | "slash" | "ticket" | "question" | "task" | "idea";
   rawNote: string;
 }
 
@@ -342,6 +344,17 @@ export function buildPrompt(
   // brand-new task with duplicated meta-instructions.
   if (opts?.followUp && opts.sessionId) {
     return { prompt: rawNote, intent, rawNote };
+  }
+
+  // Palette commands: a distinct system prompt frames the run, replacing the
+  // generic intent framing. Matched BEFORE the slash passthrough so an unknown
+  // slash (a real CLI command) still falls through to verbatim below.
+  const parsed = parseCommand(rawNote);
+  if (parsed) {
+    const preamble = `${parsed.command.systemPrompt}\n\n${CONCISENESS_DIRECTIVE}`;
+    const arg = parsed.argument;
+    const prompt = arg ? `${preamble}\n\n---\n\n${arg}` : preamble;
+    return { prompt, intent: "command", rawNote };
   }
 
   // Slash commands: ALWAYS verbatim. The CLI parses them; wrapping breaks
