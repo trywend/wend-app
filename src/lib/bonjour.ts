@@ -167,7 +167,10 @@ export async function discoverDaemon(
             service?.type ?? `_${WEND_SERVICE_TYPE}._${WEND_SERVICE_PROTOCOL}`,
           ),
           host: String(service?.host ?? service?.addresses?.[0] ?? ""),
-          port: Number(service?.port ?? 9876),
+          // The advertised service runs on an ephemeral NWListener port we
+          // never serve from; the real daemon port is in the TXT "port"
+          // field. Prefer it, fall back to the resolved port, then 9876.
+          port: Number(txtRaw.port ?? service?.port ?? 9876),
           txt: {
             url: typeof txtRaw.url === "string" ? txtRaw.url : undefined,
             host: typeof txtRaw.host === "string" ? txtRaw.host : undefined,
