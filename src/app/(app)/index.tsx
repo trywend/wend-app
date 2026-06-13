@@ -1002,8 +1002,12 @@ export default function HomeScreen() {
           </Animated.View>
         ) : null}
 
-        {/* ─── Config warning banner ─────────────────────────────────── */}
-        {!daemonConfigured ? (
+        {/* ─── Dev-only config hint ──────────────────────────────────────
+            Shown only in development when the daemon env vars are missing.
+            A normal unpaired user is NOT in an error state — they just
+            haven't connected a Mac yet; the send action surfaces a
+            friendly "No Mac paired" message in that case. */}
+        {__DEV__ && !daemonConfigured ? (
           <View
             style={{
               backgroundColor: tokens["status-warn"],
