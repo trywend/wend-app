@@ -50,6 +50,9 @@ export interface UseNoteEditorResult {
   appendRun: (run: PersistedRun) => void;
   /** Update the follow-up text typed under the run at index `idx`. */
   updateRunFollowUp: (idx: number, text: string) => void;
+  /** Drop the run at index `idx` from history — used by Retry so the
+   *  re-dispatch replaces the failed run instead of stacking a new one. */
+  removeRun: (idx: number) => void;
   isLoading: boolean;
   isDirty: boolean;
   lastSavedAt: number | null;
@@ -286,6 +289,21 @@ export function useNoteEditor(noteId?: string): UseNoteEditorResult {
     [scheduleFlush],
   );
 
+  const removeRun = useCallback(
+    (idx: number) => {
+      const current = runsRef.current;
+      if (idx < 0 || idx >= current.length) return;
+      const next = current.slice();
+      next.splice(idx, 1);
+      runsRef.current = next;
+      pendingRunsRef.current = true;
+      setRunsState(next);
+      setIsDirty(true);
+      scheduleFlush();
+    },
+    [scheduleFlush],
+  );
+
   /* ------------------------------------------------------------------- */
   /* Unmount — final flush so in-flight debounce isn't lost.              */
   /* ------------------------------------------------------------------- */
@@ -319,6 +337,7 @@ export function useNoteEditor(noteId?: string): UseNoteEditorResult {
     setCwd,
     appendRun,
     updateRunFollowUp,
+    removeRun,
     isLoading,
     isDirty,
     lastSavedAt,

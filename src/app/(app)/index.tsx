@@ -177,6 +177,7 @@ export default function HomeScreen() {
     setCwd,
     appendRun,
     updateRunFollowUp,
+    removeRun,
     noteId: resolvedNoteId,
   } = useNoteEditor(currentNoteId);
   const { refresh: refreshNotes } = useNotesList();
@@ -575,8 +576,12 @@ export default function HomeScreen() {
     // small parallel Claude call to summarize the body into a 2–4 word
     // title. Non-blocking; if the user types a title before this resolves
     // we discard the result.
+    // Fire on the first send AND on a retry (promptOverride) — a note
+    // whose first dispatch failed should still get an auto-title once a
+    // retry succeeds. The title-empty guard + edit-token keep it from
+    // clobbering a title the user typed.
     if (
-      isFirstSend &&
+      (isFirstSend || Boolean(promptOverride)) &&
       title.trim().length === 0 &&
       body.trim().length > 0
     ) {
@@ -872,19 +877,18 @@ export default function HomeScreen() {
   }
 
   /* ─── Retry a failed run ───────────────────────────────────────────── */
-  function handleRetry(_idx: number, failedRun: PersistedRun) {
-    // Re-send the failed run's prompt as a fresh dispatch. Don't reuse the
-    // sessionId — Claude likely didn't establish one when the run errored.
-    // The new dispatch becomes a brand-new entry in runs[]; the old errored
-    // entry stays as history so the user can see what happened.
+  function handleRetry(idx: number, failedRun: PersistedRun) {
+    // Retry means "continue THIS response", not "add another one". Drop the
+    // failed run from history first so the re-dispatch streams into the same
+    // slot instead of stacking a second block below it. Don't reuse the
+    // sessionId — Claude likely never established one when the run errored.
     //
     // We pass the prompt directly via the override path on handleSend
-    // instead of doing setBody+setTimeout — that pattern broke for
-    // FOLLOW-UP retries because nextPromptSource is computed from
-    // body OR lastFollowUp (never both), so setBody didn't actually
-    // change what handleSend would send.
+    // instead of setBody+setTimeout — that broke for FOLLOW-UP retries
+    // because nextPromptSource reads body OR lastFollowUp (never both).
     if (isStreaming) return;
     setInflight(null);
+    removeRun(idx);
     void handleSend(failedRun.prompt);
   }
 
