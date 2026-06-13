@@ -13,6 +13,7 @@
  */
 import { forwardRef, useMemo } from "react";
 import type { Ref, ComponentRef } from "react";
+import { TurboModuleRegistry } from "react-native";
 import type { TextInput, TextInputProps } from "react-native";
 import { MarkdownTextInput } from "@expensify/react-native-live-markdown";
 
@@ -21,6 +22,17 @@ import {
   parseWendMarkdown,
   type LiveMarkdownTheme,
 } from "@/lib/liveMarkdownParser";
+
+// Missing native module means markdown renders as plain text with no crash —
+// the failure mode of an OTA landing on a binary built before the lib. Surface
+// it so it never again reads as a parser bug.
+if (__DEV__ && TurboModuleRegistry.get("LiveMarkdownModule") == null) {
+  console.warn(
+    "[Wend] LiveMarkdownModule native module is missing from this binary. " +
+      "Live markdown will render as plain text. Ship a fresh `eas build` — " +
+      "an OTA update cannot deliver the native decorator.",
+  );
+}
 
 export interface LiveMarkdownInputProps
   extends Omit<TextInputProps, "children"> {
