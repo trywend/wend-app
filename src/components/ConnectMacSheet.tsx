@@ -704,6 +704,7 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
               border={border}
               accent={accent}
               accentOn={accentOn}
+              failed={tokens["status-failed"]}
             />
           ) : !cameraAvailable && mode === "scanning" ? (
             <CameraUnavailableView
@@ -1300,6 +1301,7 @@ function ErrorView(props: {
   border: string;
   accent: string;
   accentOn: string;
+  failed: string;
 }) {
   return (
     <Centered>
@@ -1310,11 +1312,11 @@ function ErrorView(props: {
           borderRadius: 32,
           alignItems: "center",
           justifyContent: "center",
-          backgroundColor: "rgba(186,26,26,0.12)",
+          backgroundColor: `${props.failed}1F`,
           marginBottom: 14,
         }}
       >
-        <WarningIcon size={28} color="#BA1A1A" weight="fill" />
+        <WarningIcon size={28} color={props.failed} weight="fill" />
       </View>
       <Text
         style={{

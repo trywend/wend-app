@@ -50,6 +50,7 @@ import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
 import { Markdown } from "@/components/editor/Markdown";
 import { parseMarkdown, summarizeMarkdown } from "@/lib/agentMarkdown";
+import { humanizeDispatchError } from "@/lib/dispatch/humanizeError";
 import { ToolCompaction } from "@/components/editor/ToolCompaction";
 import { FileChangesSummary } from "@/components/editor/FileChangesSummary";
 import { RunLinksSummary } from "@/components/editor/RunLinksSummary";
@@ -442,63 +443,77 @@ export function AgentRunBlock({
               style={{
                 paddingHorizontal: 14,
                 paddingVertical: 12,
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 12,
+                gap: 10,
                 borderTopWidth: state.response.length > 0 ? 1 : 0,
                 borderTopColor: border,
                 backgroundColor: `${tokens["status-failed"]}0A`,
               }}
             >
-              <Text
+              <View
                 style={{
-                  flex: 1,
-                  fontFamily: "Inter-Regular",
-                  fontSize: 13,
-                  color: tokens["status-failed"],
-                  lineHeight: 19,
+                  flexDirection: "row",
+                  alignItems: "flex-start",
+                  gap: 9,
                 }}
               >
-                {state.error}
-              </Text>
-              {onRetry ? (
-                <View
+                <View style={{ marginTop: 1 }}>
+                  <WarningIcon
+                    size={15}
+                    color={tokens["status-failed"]}
+                    weight="fill"
+                  />
+                </View>
+                <Text
                   style={{
-                    position: "relative",
-                    height: 30,
-                    borderRadius: 15,
-                    paddingHorizontal: 12,
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    backgroundColor: accent,
-                    overflow: "hidden",
+                    flex: 1,
+                    fontFamily: "Inter-Regular",
+                    fontSize: 13,
+                    color: tokens["status-failed"],
+                    lineHeight: 19,
                   }}
                 >
-                  <ArrowClockwiseIcon size={12} color="#FFFFFF" weight="bold" />
-                  <Text
+                  {humanizeDispatchError(state.error)}
+                </Text>
+              </View>
+              {onRetry ? (
+                <View style={{ flexDirection: "row" }}>
+                  <View
                     style={{
-                      marginLeft: 6,
-                      fontFamily: "Inter-SemiBold",
-                      fontSize: 12.5,
-                      color: "#FFFFFF",
+                      position: "relative",
+                      height: 30,
+                      borderRadius: 15,
+                      paddingHorizontal: 14,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      backgroundColor: accent,
+                      overflow: "hidden",
                     }}
                   >
-                    Retry
-                  </Text>
-                  <Pressable
-                    onPress={onRetry}
-                    accessibilityRole="button"
-                    accessibilityLabel="Retry dispatch"
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                    }}
-                  />
+                    <ArrowClockwiseIcon size={12} color="#FFFFFF" weight="bold" />
+                    <Text
+                      style={{
+                        marginLeft: 6,
+                        fontFamily: "Inter-SemiBold",
+                        fontSize: 12.5,
+                        color: "#FFFFFF",
+                      }}
+                    >
+                      Retry
+                    </Text>
+                    <Pressable
+                      onPress={onRetry}
+                      accessibilityRole="button"
+                      accessibilityLabel="Retry dispatch"
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                      }}
+                    />
+                  </View>
                 </View>
               ) : null}
             </View>

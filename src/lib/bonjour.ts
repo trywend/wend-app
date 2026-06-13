@@ -279,18 +279,21 @@ export async function startLanPair(
       if (typeof body.id === "string" && body.id.length > 0) {
         return { status: "pending", id: body.id };
       }
-      return { status: "error", reason: "Mac returned no pairing id." };
+      return {
+        status: "error",
+        reason: "Your Mac didn't return a pairing code. Try again.",
+      };
     }
     return {
       status: "error",
-      reason: `Mac rejected the pairing request (HTTP ${res.status}).`,
+      reason: "Your Mac declined the pairing request. Approve it on the Mac, then try again.",
     };
-  } catch (err) {
+  } catch {
     // ECONNREFUSED, network down, etc.
     return {
       status: "error",
       reason:
-        err instanceof Error ? err.message : "Couldn't reach your Mac on the local network.",
+        "Couldn't reach your Mac. Check you're both on the same Wi-Fi, then try again.",
     };
   }
 }
@@ -350,7 +353,10 @@ export async function pollLanPair(
                 : undefined,
           };
         }
-        return { status: "error", reason: "Mac returned an unexpected response." };
+        return {
+          status: "error",
+          reason: "Your Mac sent something unexpected. Try pairing again.",
+        };
       }
       if (res.status === 202) {
         // Pending — keep polling.
@@ -358,10 +364,10 @@ export async function pollLanPair(
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         const reason =
           body.error === "expired"
-            ? "Pairing request timed out."
+            ? "The pairing code expired. Generate a fresh one on your Mac and try again."
             : body.error === "rejected"
-              ? "Mac rejected the pairing request."
-              : "Mac closed the pairing request.";
+              ? "Your Mac declined the pairing request. Approve it on the Mac, then try again."
+              : "Your Mac closed the pairing request. Try again.";
         return {
           status: body.error === "rejected" ? "rejected" : "error",
           reason,
@@ -369,7 +375,7 @@ export async function pollLanPair(
       } else {
         return {
           status: "error",
-          reason: `Mac returned HTTP ${res.status}.`,
+          reason: "Your Mac hit an error while pairing. Try again.",
         };
       }
     } catch (err) {
@@ -382,7 +388,11 @@ export async function pollLanPair(
     }
     await new Promise((r) => setTimeout(r, intervalMs));
   }
-  return { status: "error", reason: "Pairing request timed out." };
+  return {
+    status: "error",
+    reason:
+      "Pairing timed out. Make sure your Mac is awake and on the same Wi-Fi, then try again.",
+  };
 }
 
 /** Build a friendly default for the NSAlert that pops on the Mac.
