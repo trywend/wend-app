@@ -77,6 +77,7 @@ import {
 } from "phosphor-react-native";
 
 import { Text } from "@/components/primitives";
+import { registerDevicePresence } from "@/lib/notifications";
 import { useTheme } from "@/theme/ThemeProvider";
 import {
   parsePairingString,
@@ -288,7 +289,15 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
   /** Clerk session — used to mint a JWT for the adopt call below. The
    *  device row gets bound to the signed-in user the moment the phone
    *  finishes parsing the QR. */
-  const { getToken, isSignedIn } = useAuth();
+  const { getToken, isSignedIn, userId } = useAuth();
+
+  /** Fire-and-forget presence ping so the phone shows up on the Mac the
+   *  moment pairing completes — don't wait for the next push-registration
+   *  pass. Never blocks the UI; swallows its own failures. */
+  function pingPresence() {
+    if (!userId) return;
+    void registerDevicePresence({ userId, getToken: () => getToken() });
+  }
 
   // Request permission only once the user is actually IN the scanning
   // mode (chose it, or Bonjour fell through to it). Requesting on mount
@@ -411,6 +420,7 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
       }
     }
 
+    pingPresence();
     setMode("success");
     // Auto-close so the user lands back on Settings with the "Connected
     // to <host>" subtitle.
@@ -513,6 +523,7 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
       }
     }
 
+    pingPresence();
     setMode("success");
     setTimeout(onClose, 1400);
   }
@@ -766,6 +777,7 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
                   issued: Date.now(),
                 });
                 setPairedHost(out.host);
+                pingPresence();
                 setMode("success");
                 setTimeout(onClose, 1400);
               }}

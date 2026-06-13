@@ -42,6 +42,7 @@ import Constants from "expo-constants";
 import { Platform } from "react-native";
 
 import { useNotificationsStore } from "@/store/notificationsSlice";
+import { getInstallId } from "@/lib/installId";
 
 /** Production rendezvous backend (Vercel deployment of the landing).
  *  Override via EXPO_PUBLIC_RENDEZVOUS_BASE for local dev. Same env var
@@ -63,6 +64,96 @@ function easProjectId(): string | undefined {
       | undefined)?.extra?.eas?.projectId;
   if (typeof fromExtra === "string" && fromExtra.length > 0) return fromExtra;
   return undefined;
+}
+
+/** Friendly device name for the Mac's Phones pane. Prefers the user-set
+ *  name (e.g. "Agnij's Phone"), falls back to the model ("Pixel 9"),
+ *  then undefined. expo-device is lazy-required like the other native
+ *  modules so this stays usable when the module isn't linked. */
+function deviceName(): string | undefined {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+    const Device = require("expo-device") as any;
+    const named = Device?.deviceName as string | undefined;
+    if (typeof named === "string" && named.length > 0) return named;
+    const model = Device?.modelName as string | undefined;
+    if (typeof model === "string" && model.length > 0) return model;
+  } catch {
+    // expo-device not linked — presence still registers without a name
+  }
+  return undefined;
+}
+
+function currentPlatform(): "ios" | "android" | "other" {
+  return Platform.OS === "ios"
+    ? "ios"
+    : Platform.OS === "android"
+      ? "android"
+      : "other";
+}
+
+/** POST the presence (and optionally push) row to the rendezvous backend.
+ *  `token` is OPTIONAL: omitting it registers presence only, so a phone
+ *  whose push registration never completes still appears on the Mac.
+ *  Returns true on a 2xx, false otherwise. NEVER throws. */
+async function postRegister(args: {
+  jwt: string;
+  installId: string;
+  platform: "ios" | "android" | "other";
+  name?: string;
+  token?: string;
+}): Promise<boolean> {
+  const body: {
+    installId: string;
+    platform: "ios" | "android" | "other";
+    name?: string;
+    token?: string;
+  } = { installId: args.installId, platform: args.platform };
+  if (args.name) body.name = args.name;
+  if (args.token) body.token = args.token;
+  try {
+    const res = await fetch(`${BACKEND_BASE}/api/notifications/register`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${args.jwt}`,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      console.log(`[wend.push] register HTTP ${res.status}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.log("[wend.push] register network error:", err);
+    return false;
+  }
+}
+
+/** Register device presence WITHOUT requiring a push token. Always safe to
+ *  call as long as a Clerk JWT is obtainable — used both standalone (at
+ *  pair time) and as the floor of `ensurePushNotificationsRegistered`.
+ *  NEVER throws; swallows all failures and relies on the next launch to
+ *  retry. */
+export async function registerDevicePresence(
+  args: RegisterPushArgs,
+): Promise<void> {
+  let jwt: string | null = null;
+  try {
+    jwt = await args.getToken();
+  } catch (err) {
+    console.log("[wend.push] presence getToken failed:", err);
+  }
+  if (!jwt) return;
+
+  const installId = await getInstallId();
+  await postRegister({
+    jwt,
+    installId,
+    platform: currentPlatform(),
+    name: deviceName(),
+  });
 }
 
 type ExpoNotificationsModule = {
@@ -189,20 +280,42 @@ export interface RegisterPushArgs {
 }
 
 /**
- * Request permission + fetch + register the device's Expo push token.
- * Safe to call on every sign-in; the slice short-circuits if the same
- * token was already registered for the same user.
+ * Register device presence, then upgrade the same row with an Expo push
+ * token when one can be obtained. Presence ALWAYS registers (so the phone
+ * shows up on the Mac) as long as a Clerk JWT is available — a denied push
+ * permission, a missing expo-notifications module, or a failed token fetch
+ * no longer prevents the device from appearing.
  *
- * Returns the token on success, or null when permission was denied /
- * the module wasn't installed / a network error occurred. NEVER throws.
+ * Returns the push token on success, or null when push wasn't obtained
+ * (presence may still have registered). NEVER throws.
  */
 export async function ensurePushNotificationsRegistered(
   args: RegisterPushArgs,
 ): Promise<string | null> {
+  const installId = await getInstallId();
+  const platform = currentPlatform();
+  const name = deviceName();
+
+  // Mint the JWT once and reuse it for both the presence and the
+  // (later) token-bearing call.
+  let jwt: string | null = null;
+  try {
+    jwt = await args.getToken();
+  } catch (err) {
+    console.log("[wend.push] getToken failed:", err);
+  }
+
+  // Presence floor — fire as long as we have a JWT, regardless of push
+  // permission. This is the bug fix: previously a denied permission
+  // returned before any backend call, so the phone never appeared.
+  if (jwt) {
+    await postRegister({ jwt, installId, platform, name });
+  }
+
   const N = loadExpoNotifications();
   if (!N) {
     console.log(
-      "[wend.push] expo-notifications not installed — skipping. " +
+      "[wend.push] expo-notifications not installed — presence only. " +
         "Merge the additions documented at the top of src/lib/notifications.ts.",
     );
     return null;
@@ -233,7 +346,7 @@ export async function ensurePushNotificationsRegistered(
     return null;
   }
   if (status !== "granted") {
-    console.log("[wend.push] permission not granted; skipping registration");
+    console.log("[wend.push] permission not granted; presence-only registration kept");
     return null;
   }
 
@@ -254,18 +367,10 @@ export async function ensurePushNotificationsRegistered(
   // Short-circuit if we've already registered this exact token for this user.
   const slice = useNotificationsStore.getState();
   if (slice.userId === args.userId && slice.token === token) {
-    // Touch lastRegisteredAt anyway so the value reflects most recent boot.
     slice.markRegistered(args.userId, token);
     return token;
   }
 
-  // POST to backend with Clerk JWT.
-  let jwt: string | null = null;
-  try {
-    jwt = await args.getToken();
-  } catch (err) {
-    console.log("[wend.push] getToken failed:", err);
-  }
   if (!jwt) {
     // Without a JWT we can't authorize the register call. Cache the
     // token locally so a later sign-in can replay.
@@ -273,32 +378,14 @@ export async function ensurePushNotificationsRegistered(
     return token;
   }
 
-  const platform: "ios" | "android" | "other" =
-    Platform.OS === "ios" ? "ios" : Platform.OS === "android" ? "android" : "other";
-
-  try {
-    const res = await fetch(`${BACKEND_BASE}/api/notifications/register`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${jwt}`,
-      },
-      body: JSON.stringify({ token, platform }),
-    });
-    if (!res.ok) {
-      console.log(
-        `[wend.push] register HTTP ${res.status} — leaving slice unchanged`,
-      );
-      slice.setPendingToken(token);
-      return token;
-    }
-    slice.markRegistered(args.userId, token);
-    return token;
-  } catch (err) {
-    console.log("[wend.push] register network error:", err);
+  // Upgrade the presence row to push-capable: same call, now with token.
+  const ok = await postRegister({ jwt, installId, platform, name, token });
+  if (!ok) {
     slice.setPendingToken(token);
     return token;
   }
+  slice.markRegistered(args.userId, token);
+  return token;
 }
 
 /** Cleanup hook — call from a top-level component's unmount path if
