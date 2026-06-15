@@ -114,90 +114,111 @@ export function parseWendMarkdown(input: string): MarkdownRange[] {
 
 function parseInline(
   out: MarkdownRange[],
-  line: string,
-  base: number,
+  rootLine: string,
+  rootBase: number,
 ): void {
   "worklet";
 
-  let i = 0;
-  while (i < line.length) {
-    const ch = line[i]!;
+  // Explicit work-stack instead of self-recursion. A worklet that calls
+  // itself by name resolves to undefined on the markdown UI runtime (the
+  // compiler doesn't capture a top-level function in its own closure), so
+  // the recursive form threw on the first bold/italic/code span and the
+  // library silently dropped ALL styling. The stack re-parses nested
+  // emphasis without the function ever referencing itself.
+  const stack: number[] = [];
+  const texts: string[] = [rootLine];
+  const bases: number[] = [rootBase];
+  stack.push(0);
 
-    if (ch === "`") {
-      const close = line.indexOf("`", i + 1);
-      if (close !== -1 && close > i + 1) {
-        out.push({ type: "syntax", start: base + i, length: 1 });
-        out.push({ type: "code", start: base + i + 1, length: close - i - 1 });
-        out.push({ type: "syntax", start: base + close, length: 1 });
-        i = close + 1;
-        continue;
-      }
-    }
+  while (stack.length > 0) {
+    const idx = stack.pop()!;
+    const line = texts[idx]!;
+    const base = bases[idx]!;
 
-    if (ch === "[") {
-      const closeBracket = line.indexOf("]", i + 1);
-      if (closeBracket !== -1 && line[closeBracket + 1] === "(") {
-        const closeParen = line.indexOf(")", closeBracket + 2);
-        if (closeParen !== -1) {
+    let i = 0;
+    while (i < line.length) {
+      const ch = line[i]!;
+
+      if (ch === "`") {
+        const close = line.indexOf("`", i + 1);
+        if (close !== -1 && close > i + 1) {
           out.push({ type: "syntax", start: base + i, length: 1 });
-          if (closeBracket > i + 1) {
-            out.push({
-              type: "link",
-              start: base + i + 1,
-              length: closeBracket - i - 1,
-            });
-          }
-          out.push({ type: "syntax", start: base + closeBracket, length: 2 });
-          if (closeParen > closeBracket + 2) {
-            out.push({
-              type: "syntax",
-              start: base + closeBracket + 2,
-              length: closeParen - closeBracket - 2,
-            });
-          }
-          out.push({ type: "syntax", start: base + closeParen, length: 1 });
-          i = closeParen + 1;
-          continue;
-        }
-      }
-    }
-
-    if (
-      (ch === "*" && line[i + 1] === "*") ||
-      (ch === "_" && line[i + 1] === "_")
-    ) {
-      const marker = ch + ch;
-      const close = line.indexOf(marker, i + 2);
-      if (close !== -1 && close > i + 2) {
-        out.push({ type: "syntax", start: base + i, length: 2 });
-        out.push({ type: "bold", start: base + i + 2, length: close - i - 2 });
-        parseInline(out, line.slice(i + 2, close), base + i + 2);
-        out.push({ type: "syntax", start: base + close, length: 2 });
-        i = close + 2;
-        continue;
-      }
-    }
-
-    if (ch === "*" || ch === "_") {
-      const close = line.indexOf(ch, i + 1);
-      if (close !== -1 && close > i + 1) {
-        const inner = line.slice(i + 1, close);
-        if (!inner.startsWith(ch) && !inner.endsWith(ch)) {
-          out.push({ type: "syntax", start: base + i, length: 1 });
-          out.push({
-            type: "italic",
-            start: base + i + 1,
-            length: inner.length,
-          });
-          parseInline(out, inner, base + i + 1);
+          out.push({ type: "code", start: base + i + 1, length: close - i - 1 });
           out.push({ type: "syntax", start: base + close, length: 1 });
           i = close + 1;
           continue;
         }
       }
-    }
 
-    i += 1;
+      if (ch === "[") {
+        const closeBracket = line.indexOf("]", i + 1);
+        if (closeBracket !== -1 && line[closeBracket + 1] === "(") {
+          const closeParen = line.indexOf(")", closeBracket + 2);
+          if (closeParen !== -1) {
+            out.push({ type: "syntax", start: base + i, length: 1 });
+            if (closeBracket > i + 1) {
+              out.push({
+                type: "link",
+                start: base + i + 1,
+                length: closeBracket - i - 1,
+              });
+            }
+            out.push({ type: "syntax", start: base + closeBracket, length: 2 });
+            if (closeParen > closeBracket + 2) {
+              out.push({
+                type: "syntax",
+                start: base + closeBracket + 2,
+                length: closeParen - closeBracket - 2,
+              });
+            }
+            out.push({ type: "syntax", start: base + closeParen, length: 1 });
+            i = closeParen + 1;
+            continue;
+          }
+        }
+      }
+
+      if (
+        (ch === "*" && line[i + 1] === "*") ||
+        (ch === "_" && line[i + 1] === "_")
+      ) {
+        const marker = ch + ch;
+        const close = line.indexOf(marker, i + 2);
+        if (close !== -1 && close > i + 2) {
+          out.push({ type: "syntax", start: base + i, length: 2 });
+          out.push({ type: "bold", start: base + i + 2, length: close - i - 2 });
+          texts.push(line.slice(i + 2, close));
+          bases.push(base + i + 2);
+          stack.push(texts.length - 1);
+          out.push({ type: "syntax", start: base + close, length: 2 });
+          i = close + 2;
+          continue;
+        }
+      }
+
+      if (ch === "*" || ch === "_") {
+        const close = line.indexOf(ch, i + 1);
+        if (close !== -1 && close > i + 1) {
+          const inner = line.slice(i + 1, close);
+          if (!inner.startsWith(ch) && !inner.endsWith(ch)) {
+            out.push({ type: "syntax", start: base + i, length: 1 });
+            out.push({
+              type: "italic",
+              start: base + i + 1,
+              length: inner.length,
+            });
+            texts.push(inner);
+            bases.push(base + i + 1);
+            stack.push(texts.length - 1);
+            out.push({ type: "syntax", start: base + close, length: 1 });
+            i = close + 1;
+            continue;
+          }
+        }
+      }
+
+      i += 1;
+    }
   }
 }
 
