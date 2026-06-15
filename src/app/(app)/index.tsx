@@ -31,6 +31,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  Animated as RNAnimated,
+  Easing,
   Image as RNImage,
   Keyboard,
   KeyboardAvoidingView,
@@ -122,11 +124,8 @@ import {
   AgentRunBlock,
   type AgentRunBlockState,
 } from "@/components/editor/AgentRunBlock";
-import {
-  LiveMarkdownInput,
-  type LiveMarkdownInputHandle,
-  type LiveMarkdownTheme,
-} from "@/components/editor/LiveMarkdownInput";
+import { LiveMarkdownInput } from "@/components/editor/LiveMarkdownInput";
+import type { LiveMarkdownTheme } from "@/lib/liveMarkdownParser";
 import { deriveTitleFromBody } from "@/lib/notes/deriveTitle";
 import {
   FirstNoteCoachmark,
@@ -184,6 +183,7 @@ export default function HomeScreen() {
   } = useNoteEditor(currentNoteId);
   const { refresh: refreshNotes } = useNotesList();
   const userId = useAuthStore((s) => s.user?.id);
+  const [bodyFocused, setBodyFocused] = useState(true);
   const [chipDismissed, setChipDismissed] = useState(false);
   const [inflight, setInflight] = useState<InflightRun | null>(INITIAL_INFLIGHT);
   const [inboxOpen, setInboxOpen] = useState(false);
@@ -270,10 +270,8 @@ export default function HomeScreen() {
     useDispatch();
   const resolvedDaemon = useResolvedDaemonURL();
 
-  const bodyRef = useRef<LiveMarkdownInputHandle>(null);
-  const followUpRefs = useRef<Record<number, LiveMarkdownInputHandle | null>>(
-    {},
-  );
+  const bodyRef = useRef<TextInput>(null);
+  const followUpRefs = useRef<Record<number, TextInput | null>>({});
   const scrollRef = useRef<ScrollView>(null);
   // Bumped every time the user edits the title — any in-flight auto-title
   // generation captures the value at start and discards its result if the
@@ -352,6 +350,8 @@ export default function HomeScreen() {
       followUpSelection.start,
     ],
   );
+
+  const showCaretOverlay = isBodyEmpty && bodyFocused && !hasRuns;
 
   // Dispatch chip (S13 stub) — only meaningful before the first run when the
   // user is still in the body field.
@@ -495,6 +495,32 @@ export default function HomeScreen() {
     });
     return () => sub.remove();
   }, []);
+
+  /* ─── Blinking caret overlay (empty body, S1) ──────────────────────── */
+  const blink = useRef(new RNAnimated.Value(1)).current;
+  useEffect(() => {
+    if (!showCaretOverlay) return;
+    const loop = RNAnimated.loop(
+      RNAnimated.sequence([
+        RNAnimated.timing(blink, {
+          toValue: 0,
+          duration: 0,
+          delay: 500,
+          easing: Easing.step0,
+          useNativeDriver: true,
+        }),
+        RNAnimated.timing(blink, {
+          toValue: 1,
+          duration: 0,
+          delay: 500,
+          easing: Easing.step0,
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [showCaretOverlay, blink]);
 
   /* ─── Send handler ─────────────────────────────────────────────────── */
   // `promptOverride` lets Retry (and any future caller) bypass the normal
@@ -767,72 +793,32 @@ export default function HomeScreen() {
     setChipDismissed(true);
   }
 
-  /* ─── Markdown toolbar ──────────────────────────────────────────────
-     The enriched input is WYSIWYG and exposes an imperative API. We route
-     each toolbar action to the active field — body on first send, last
-     follow-up after — resolving the live handle, its mirrored selection,
-     and a write-back that keeps the raw-markdown `value` (dispatch's source
-     of truth) in sync.
-
-       - Bold / Italic → native toggleBold()/toggleItalic(). The input
-         mirrors the new markdown out via onChangeMarkdown.
-       - Inline code / Link → no imperative toggle. We read getMarkdown(),
-         wrap the selection with our helpers, then setMarkdown()+setSelection.
-       - H1/H2/H3, bullet, numbered, quote → no imperative toggle. Same
-         getMarkdown → line-prefix transform → setMarkdown()+setSelection. */
-  type MdTarget = {
-    handle: LiveMarkdownInputHandle | null;
-    text: string;
-    selection: { start: number; end: number };
-    write: (text: string) => void;
-    setSelection: (sel: { start: number; end: number }) => void;
-  };
-
-  function activeMdTarget(): MdTarget | null {
-    if (isFirstSend) {
-      return {
-        handle: bodyRef.current,
-        text: body,
-        selection: bodySelection,
-        write: setBody,
-        setSelection: setBodySelection,
-      };
-    }
-    if (lastRunIdx < 0) return null;
-    return {
-      handle: followUpRefs.current[lastRunIdx] ?? null,
-      text: lastFollowUp,
-      selection: followUpSelection,
-      write: (t) => updateRunFollowUp(lastRunIdx, t),
-      setSelection: setFollowUpSelection,
-    };
-  }
-
-  // Compute a transformed markdown buffer off the mirrored state, push it to
-  // the native input (and parent value), and restore the cursor.
-  function applyComputed(
-    t: MdTarget,
-    next: { text: string; cursor: number },
-  ) {
-    t.write(next.text);
-    t.handle?.setMarkdown(next.text);
-    t.handle?.focus();
-    t.handle?.setSelection(next.cursor, next.cursor);
-    t.setSelection({ start: next.cursor, end: next.cursor });
-  }
-
+  /* ─── Markdown toolbar insertion ────────────────────────────────────
+     Inserts a markdown fragment at the cursor of whichever field is
+     currently the dispatch target — body on first send, last follow-up
+     after. We mirror selection state via onSelectionChange because RN's
+     TextInput has no readable selection prop. If the field isn't focused
+     (selection stale at {0,0}) we still insert at the cursor — for a
+     fresh field that's just "at the start", which is fine. */
   function applyMarkdown(action: MarkdownAction) {
-    const t = activeMdTarget();
-    if (!t) return;
-
-    if (action.kind === "wrap" && (action.left === "**" || action.left === "*")) {
-      t.handle?.focus();
-      if (action.left === "**") t.handle?.toggleBold();
-      else t.handle?.toggleItalic();
-      return;
+    if (isFirstSend) {
+      const next = insertMarkdown(body, bodySelection, action);
+      setBody(next.text);
+      // Re-focus so the keyboard stays up and the cursor lands where we
+      // computed. RN's controlled TextInput will pick up the new selection
+      // on the next render via `selection` if needed — for now we rely on
+      // the user seeing the inserted text and the cursor naturally jumping
+      // to the new end; programmatic selection re-positioning across all
+      // platforms is fragile and not worth the alpha-stage complexity.
+      setBodySelection({ start: next.cursor, end: next.cursor });
+      bodyRef.current?.focus();
+    } else {
+      if (lastRunIdx < 0) return;
+      const next = insertMarkdown(lastFollowUp, followUpSelection, action);
+      updateRunFollowUp(lastRunIdx, next.text);
+      setFollowUpSelection({ start: next.cursor, end: next.cursor });
+      followUpRefs.current[lastRunIdx]?.focus();
     }
-
-    applyComputed(t, insertMarkdown(t.text, t.selection, action));
   }
 
   /* ─── Command injection ─────────────────────────────────────────────
@@ -840,9 +826,19 @@ export default function HomeScreen() {
      dispatch field. The user types the argument after it; on Send the leading
      command segment fires in isolation with the command's system prompt. */
   function injectCommand(name: string) {
-    const t = activeMdTarget();
-    if (!t) return;
-    applyComputed(t, insertText(t.text, t.selection, `${name} `));
+    const snippet = `${name} `;
+    if (isFirstSend) {
+      const next = insertText(body, bodySelection, snippet);
+      setBody(next.text);
+      setBodySelection({ start: next.cursor, end: next.cursor });
+      bodyRef.current?.focus();
+    } else {
+      if (lastRunIdx < 0) return;
+      const next = insertText(lastFollowUp, followUpSelection, snippet);
+      updateRunFollowUp(lastRunIdx, next.text);
+      setFollowUpSelection({ start: next.cursor, end: next.cursor });
+      followUpRefs.current[lastRunIdx]?.focus();
+    }
   }
 
   /* ─── Inbox sheet handlers ──────────────────────────────────────────── */
@@ -1107,30 +1103,52 @@ export default function HomeScreen() {
             style={{ minHeight: 80 }}
             onPress={() => bodyRef.current?.focus()}
           >
-            <LiveMarkdownInput
-              ref={bodyRef}
-              value={body}
-              onChangeText={setBody}
-              theme={liveMdTheme}
-              autoFocus
-              placeholder={hasContent ? "Write a thought..." : ""}
-              placeholderTextColor={placeholderColor}
-              selectionColor={tokens["accent-caret"]}
-              onSelectionChange={(e) =>
-                setBodySelection(e.nativeEvent.selection)
-              }
-              scrollEnabled={false}
-              style={{
-                minHeight: 80,
-                fontFamily: "Inter-Regular",
-                fontSize: typography.body.fontSize,
-                lineHeight: typography.body.lineHeight,
-                letterSpacing: -0.187,
-                color: inkColor,
-                padding: 0,
-                margin: 0,
-              }}
-            />
+            <View style={{ position: "relative" }}>
+              {showCaretOverlay ? (
+                <RNAnimated.View
+                  pointerEvents="none"
+                  style={{
+                    position: "absolute",
+                    top: 2,
+                    left: 0,
+                    width: 2,
+                    height: typography.body.lineHeight - 4,
+                    backgroundColor: tokens["accent-caret"],
+                    opacity: blink,
+                  }}
+                />
+              ) : null}
+
+              <LiveMarkdownInput
+                ref={bodyRef}
+                value={body}
+                onChangeText={setBody}
+                theme={liveMdTheme}
+                autoFocus
+                caretHidden={showCaretOverlay}
+                textAlignVertical="top"
+                placeholder={hasContent ? "Write a thought..." : ""}
+                placeholderTextColor={placeholderColor}
+                selectionColor={tokens["accent-caret"]}
+                onFocus={() => setBodyFocused(true)}
+                onBlur={() => setBodyFocused(false)}
+                onSelectionChange={(e) =>
+                  setBodySelection(e.nativeEvent.selection)
+                }
+                scrollEnabled={false}
+                style={{
+                  minHeight: 80,
+                  fontFamily: "Inter-Regular",
+                  fontSize: typography.body.fontSize,
+                  lineHeight: typography.body.lineHeight,
+                  letterSpacing: -0.187,
+                  color: inkColor,
+                  padding: 0,
+                  margin: 0,
+                  textAlignVertical: "top",
+                }}
+              />
+            </View>
           </Pressable>
 
           {/* Attachments added while composing the body render inline here,
@@ -1866,7 +1884,7 @@ function FollowUpInput(props: {
   inkColor: string;
   caretColor: string;
   mdTheme: LiveMarkdownTheme;
-  inputRef: (r: LiveMarkdownInputHandle | null) => void;
+  inputRef: (r: TextInput | null) => void;
   isLast: boolean;
   onFocus: () => void;
 }) {
@@ -1894,6 +1912,7 @@ function FollowUpInput(props: {
         placeholderTextColor={props.placeholderColor}
         selectionColor={props.caretColor}
         scrollEnabled={false}
+        textAlignVertical="top"
         style={{
           minHeight: 40,
           fontFamily: "Inter-Regular",
@@ -1903,6 +1922,7 @@ function FollowUpInput(props: {
           color: props.inkColor,
           padding: 0,
           margin: 0,
+          textAlignVertical: "top",
         }}
       />
     </View>

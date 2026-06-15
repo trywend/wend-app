@@ -95,12 +95,6 @@
           }
         }
       ],
-      [
-        "react-native-enriched-markdown",
-        {
-          "enableMath": false
-        }
-      ],
       "./plugins/withBouncyCastlePin"
     ],
     "experiments": {

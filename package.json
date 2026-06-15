@@ -5,6 +5,7 @@
   "dependencies": {
     "@better-auth/expo": "^1.6.11",
     "@clerk/clerk-expo": "^2.19.31",
+    "@expensify/react-native-live-markdown": "0.1.327",
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo-google-fonts/jetbrains-mono": "^0.4.1",
     "@expo/ui": "~56.0.14",
@@ -49,7 +50,6 @@
     "react-native": "0.85.3",
     "react-native-blob-util": "^0.24.9",
     "react-native-css-interop": "^0.2.4",
-    "react-native-enriched-markdown": "^0.6.0",
     "react-native-gesture-handler": "~2.31.1",
     "react-native-reanimated": "4.3.1",
     "react-native-safe-area-context": "~5.7.0",
