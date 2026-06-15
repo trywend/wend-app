@@ -100,7 +100,8 @@
         {
           "enableMath": false
         }
-      ]
+      ],
+      "./plugins/withBouncyCastlePin"
     ],
     "experiments": {
       "typedRoutes": true,
