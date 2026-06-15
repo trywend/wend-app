@@ -94,6 +94,12 @@
             "usesCleartextTraffic": true
           }
         }
+      ],
+      [
+        "react-native-enriched-markdown",
+        {
+          "enableMath": false
+        }
       ]
     ],
     "experiments": {
