@@ -31,8 +31,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
-  Animated as RNAnimated,
-  Easing,
   Image as RNImage,
   Keyboard,
   KeyboardAvoidingView,
@@ -125,7 +123,11 @@ import {
   type AgentRunBlockState,
 } from "@/components/editor/AgentRunBlock";
 import { LiveMarkdownInput } from "@/components/editor/LiveMarkdownInput";
-import type { LiveMarkdownTheme } from "@/lib/liveMarkdownParser";
+import type {
+  EditorCommand,
+  LiveMarkdownInputRef,
+  LiveMarkdownTheme,
+} from "@/components/editor/LiveMarkdownInput";
 import { deriveTitleFromBody } from "@/lib/notes/deriveTitle";
 import {
   FirstNoteCoachmark,
@@ -183,7 +185,6 @@ export default function HomeScreen() {
   } = useNoteEditor(currentNoteId);
   const { refresh: refreshNotes } = useNotesList();
   const userId = useAuthStore((s) => s.user?.id);
-  const [bodyFocused, setBodyFocused] = useState(true);
   const [chipDismissed, setChipDismissed] = useState(false);
   const [inflight, setInflight] = useState<InflightRun | null>(INITIAL_INFLIGHT);
   const [inboxOpen, setInboxOpen] = useState(false);
@@ -270,7 +271,7 @@ export default function HomeScreen() {
     useDispatch();
   const resolvedDaemon = useResolvedDaemonURL();
 
-  const bodyRef = useRef<TextInput>(null);
+  const bodyRef = useRef<LiveMarkdownInputRef>(null);
   const followUpRefs = useRef<Record<number, TextInput | null>>({});
   const scrollRef = useRef<ScrollView>(null);
   // Bumped every time the user edits the title — any in-flight auto-title
@@ -350,8 +351,6 @@ export default function HomeScreen() {
       followUpSelection.start,
     ],
   );
-
-  const showCaretOverlay = isBodyEmpty && bodyFocused && !hasRuns;
 
   // Dispatch chip (S13 stub) — only meaningful before the first run when the
   // user is still in the body field.
@@ -495,32 +494,6 @@ export default function HomeScreen() {
     });
     return () => sub.remove();
   }, []);
-
-  /* ─── Blinking caret overlay (empty body, S1) ──────────────────────── */
-  const blink = useRef(new RNAnimated.Value(1)).current;
-  useEffect(() => {
-    if (!showCaretOverlay) return;
-    const loop = RNAnimated.loop(
-      RNAnimated.sequence([
-        RNAnimated.timing(blink, {
-          toValue: 0,
-          duration: 0,
-          delay: 500,
-          easing: Easing.step0,
-          useNativeDriver: true,
-        }),
-        RNAnimated.timing(blink, {
-          toValue: 1,
-          duration: 0,
-          delay: 500,
-          easing: Easing.step0,
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [showCaretOverlay, blink]);
 
   /* ─── Send handler ─────────────────────────────────────────────────── */
   // `promptOverride` lets Retry (and any future caller) bypass the normal
@@ -800,21 +773,21 @@ export default function HomeScreen() {
      TextInput has no readable selection prop. If the field isn't focused
      (selection stale at {0,0}) we still insert at the cursor — for a
      fresh field that's just "at the start", which is fine. */
-  function applyMarkdown(action: MarkdownAction) {
+  function applyMarkdown(key: MarkdownActionKey) {
     if (isFirstSend) {
-      const next = insertMarkdown(body, bodySelection, action);
-      setBody(next.text);
-      // Re-focus so the keyboard stays up and the cursor lands where we
-      // computed. RN's controlled TextInput will pick up the new selection
-      // on the next render via `selection` if needed — for now we rely on
-      // the user seeing the inserted text and the cursor naturally jumping
-      // to the new end; programmatic selection re-positioning across all
-      // platforms is fragile and not worth the alpha-stage complexity.
-      setBodySelection({ start: next.cursor, end: next.cursor });
-      bodyRef.current?.focus();
+      // The body is a CodeMirror WebView — it owns the document, so the
+      // toolbar drives it through editor commands (cursor-aware natively)
+      // rather than splicing the controlled string (which would re-seed and
+      // reset the cursor).
+      bodyRef.current?.command(EDITOR_COMMAND_FOR_KEY[key]);
     } else {
+      // Follow-ups are plain native TextInputs — insert at the cursor.
       if (lastRunIdx < 0) return;
-      const next = insertMarkdown(lastFollowUp, followUpSelection, action);
+      const next = insertMarkdown(
+        lastFollowUp,
+        followUpSelection,
+        MARKDOWN_ACTIONS[key],
+      );
       updateRunFollowUp(lastRunIdx, next.text);
       setFollowUpSelection({ start: next.cursor, end: next.cursor });
       followUpRefs.current[lastRunIdx]?.focus();
@@ -955,8 +928,12 @@ export default function HomeScreen() {
       subtle: subtleColor,
       accent,
       surfaceChip,
+      // Transparent so the WebView blends into the note canvas.
+      paper: "transparent",
+      codeBg: surfaceChip,
+      border: borderColor,
     }),
-    [inkColor, subtleColor, accent, surfaceChip],
+    [inkColor, subtleColor, accent, surfaceChip, borderColor],
   );
 
   return (
@@ -1099,57 +1076,23 @@ export default function HomeScreen() {
             }}
           />
 
-          <Pressable
-            style={{ minHeight: 80 }}
-            onPress={() => bodyRef.current?.focus()}
-          >
-            <View style={{ position: "relative" }}>
-              {showCaretOverlay ? (
-                <RNAnimated.View
-                  pointerEvents="none"
-                  style={{
-                    position: "absolute",
-                    top: 2,
-                    left: 0,
-                    width: 2,
-                    height: typography.body.lineHeight - 4,
-                    backgroundColor: tokens["accent-caret"],
-                    opacity: blink,
-                  }}
-                />
-              ) : null}
-
-              <LiveMarkdownInput
-                ref={bodyRef}
-                value={body}
-                onChangeText={setBody}
-                theme={liveMdTheme}
-                autoFocus
-                caretHidden={showCaretOverlay}
-                textAlignVertical="top"
-                placeholder={hasContent ? "Write a thought..." : ""}
-                placeholderTextColor={placeholderColor}
-                selectionColor={tokens["accent-caret"]}
-                onFocus={() => setBodyFocused(true)}
-                onBlur={() => setBodyFocused(false)}
-                onSelectionChange={(e) =>
-                  setBodySelection(e.nativeEvent.selection)
-                }
-                scrollEnabled={false}
-                style={{
-                  minHeight: 80,
-                  fontFamily: "Inter-Regular",
-                  fontSize: typography.body.fontSize,
-                  lineHeight: typography.body.lineHeight,
-                  letterSpacing: -0.187,
-                  color: inkColor,
-                  padding: 0,
-                  margin: 0,
-                  textAlignVertical: "top",
-                }}
-              />
-            </View>
-          </Pressable>
+          {/* The CodeMirror WebView owns its own caret, tap-to-focus, and
+              auto-height — no wrapping Pressable / caret overlay needed. */}
+          <LiveMarkdownInput
+            ref={bodyRef}
+            value={body}
+            onChangeText={setBody}
+            theme={liveMdTheme}
+            autoFocus
+            placeholder={hasContent ? "Write a thought..." : ""}
+            onSelectionChange={setBodySelection}
+            style={{
+              minHeight: 80,
+              fontSize: typography.body.fontSize,
+              lineHeight: typography.body.lineHeight,
+              color: inkColor,
+            }}
+          />
 
           {/* Attachments added while composing the body render inline here,
               under the text they belong to — not pinned above everything. */}
@@ -1192,7 +1135,6 @@ export default function HomeScreen() {
                 placeholderColor={placeholderColor}
                 inkColor={inkColor}
                 caretColor={tokens["accent-caret"]}
-                mdTheme={liveMdTheme}
                 inputRef={(r) => {
                   followUpRefs.current[idx] = r;
                 }}
@@ -1425,21 +1367,21 @@ export default function HomeScreen() {
             >
               <MarkdownButton
                 accessibilityLabel="Heading 1"
-                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.h1)}
+                onPress={() => applyMarkdown("h1")}
                 icon={
                   <TextHOneIcon size={20} color={subtleColor} weight="regular" />
                 }
               />
               <MarkdownButton
                 accessibilityLabel="Heading 2"
-                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.h2)}
+                onPress={() => applyMarkdown("h2")}
                 icon={
                   <TextHTwoIcon size={20} color={subtleColor} weight="regular" />
                 }
               />
               <MarkdownButton
                 accessibilityLabel="Heading 3"
-                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.h3)}
+                onPress={() => applyMarkdown("h3")}
                 icon={
                   <TextHThreeIcon
                     size={20}
@@ -1451,12 +1393,12 @@ export default function HomeScreen() {
               <ToolbarDivider color={borderColor} />
               <MarkdownButton
                 accessibilityLabel="Bold"
-                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.bold)}
+                onPress={() => applyMarkdown("bold")}
                 icon={<TextBIcon size={20} color={subtleColor} weight="bold" />}
               />
               <MarkdownButton
                 accessibilityLabel="Italic"
-                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.italic)}
+                onPress={() => applyMarkdown("italic")}
                 icon={
                   <TextItalicIcon
                     size={20}
@@ -1467,13 +1409,13 @@ export default function HomeScreen() {
               />
               <MarkdownButton
                 accessibilityLabel="Inline code"
-                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.code)}
+                onPress={() => applyMarkdown("code")}
                 icon={<CodeIcon size={20} color={subtleColor} weight="regular" />}
               />
               <ToolbarDivider color={borderColor} />
               <MarkdownButton
                 accessibilityLabel="Bulleted list"
-                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.bullet)}
+                onPress={() => applyMarkdown("bullet")}
                 icon={
                   <ListBulletsIcon
                     size={20}
@@ -1484,7 +1426,7 @@ export default function HomeScreen() {
               />
               <MarkdownButton
                 accessibilityLabel="Numbered list"
-                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.numbered)}
+                onPress={() => applyMarkdown("numbered")}
                 icon={
                   <ListNumbersIcon
                     size={20}
@@ -1495,14 +1437,14 @@ export default function HomeScreen() {
               />
               <MarkdownButton
                 accessibilityLabel="Quote"
-                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.quote)}
+                onPress={() => applyMarkdown("quote")}
                 icon={
                   <QuotesIcon size={20} color={subtleColor} weight="regular" />
                 }
               />
               <MarkdownButton
                 accessibilityLabel="Link"
-                onPress={() => applyMarkdown(MARKDOWN_ACTIONS.link)}
+                onPress={() => applyMarkdown("link")}
                 icon={
                   <LinkSimpleIcon
                     size={20}
@@ -1883,13 +1825,15 @@ function FollowUpInput(props: {
   placeholderColor: string;
   inkColor: string;
   caretColor: string;
-  mdTheme: LiveMarkdownTheme;
   inputRef: (r: TextInput | null) => void;
   isLast: boolean;
   onFocus: () => void;
 }) {
-  // No inline send button here — the keyboard toolbar (always visible) owns
-  // the single send affordance. Having both confused users with two sends.
+  // Follow-ups stay a plain native TextInput: a full CodeMirror WebView per
+  // run is far too heavy (the bundle is ~500KB each and a note can hold many
+  // runs). The rich live-preview editor is reserved for the main body. The
+  // toolbar still inserts markdown here via the cursor-aware text path.
+  // No inline send button — the keyboard toolbar owns the single send.
   return (
     <View
       style={{
@@ -1897,11 +1841,11 @@ function FollowUpInput(props: {
         marginBottom: props.isLast ? 0 : 4,
       }}
     >
-      <LiveMarkdownInput
+      <TextInput
         ref={props.inputRef}
         value={props.value}
         onChangeText={props.onChangeText}
-        theme={props.mdTheme}
+        multiline
         onFocus={props.onFocus}
         onSelectionChange={
           props.onSelectionChange
@@ -2100,7 +2044,19 @@ type MarkdownAction =
   | { kind: "wrap"; left: string; right: string; placeholder?: string }
   | { kind: "link" };
 
-const MARKDOWN_ACTIONS: Record<string, MarkdownAction> = {
+type MarkdownActionKey =
+  | "h1"
+  | "h2"
+  | "h3"
+  | "bullet"
+  | "numbered"
+  | "quote"
+  | "bold"
+  | "italic"
+  | "code"
+  | "link";
+
+const MARKDOWN_ACTIONS: Record<MarkdownActionKey, MarkdownAction> = {
   h1: { kind: "linePrefix", prefix: "# " },
   h2: { kind: "linePrefix", prefix: "## " },
   h3: { kind: "linePrefix", prefix: "### " },
@@ -2111,6 +2067,20 @@ const MARKDOWN_ACTIONS: Record<string, MarkdownAction> = {
   italic: { kind: "wrap", left: "*", right: "*", placeholder: "italic" },
   code: { kind: "wrap", left: "`", right: "`", placeholder: "code" },
   link: { kind: "link" },
+};
+
+/** Maps each toolbar action key to the WebView editor's command name. */
+const EDITOR_COMMAND_FOR_KEY: Record<MarkdownActionKey, EditorCommand> = {
+  h1: "h1",
+  h2: "h2",
+  h3: "h3",
+  bullet: "ul",
+  numbered: "ol",
+  quote: "quote",
+  bold: "bold",
+  italic: "italic",
+  code: "code",
+  link: "link",
 };
 
 interface InsertResult {
