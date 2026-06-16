@@ -252,6 +252,11 @@ export const livePreview = ViewPlugin.fromClass(
       this.decorations = buildDecorations(view);
     }
     update(update: ViewUpdate) {
+      // While an IME composition is in progress (Android/Samsung predictive
+      // text, Gboard autocorrect) recomputing replace-decorations desyncs the
+      // contentEditable selection and makes backspace delete the wrong char.
+      // Keep the existing decorations and rebuild on the next settled update.
+      if (update.view.composing) return;
       if (
         update.docChanged ||
         update.viewportChanged ||

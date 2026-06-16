@@ -51,7 +51,7 @@ export function buildTheme(t: Theme) {
         WebkitOverflowScrolling: "touch",
       },
       ".cm-content": {
-        padding: "20px 22px 48px 22px",
+        padding: "16px 2px 48px 2px",
         caretColor: t.accent,
         maxWidth: "100%",
         letterSpacing: "0.002em",

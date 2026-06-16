@@ -8,6 +8,8 @@ import { syntaxHighlighting, defaultHighlightStyle } from "@codemirror/language"
 import { livePreview } from "./livePreview";
 import { Theme, defaultTheme, buildTheme, themeCompartment } from "./theme";
 import { runCommand, CommandName } from "./commands";
+import { codeLanguages } from "./codeLanguages";
+import { wendHighlightStyle } from "./highlight";
 
 declare global {
   interface Window {
@@ -88,8 +90,25 @@ const state = EditorState.create({
     history(),
     drawSelection(),
     keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
-    markdown({ base: markdownLanguage, extensions: GFM, addKeymap: false }),
+    markdown({
+      base: markdownLanguage,
+      extensions: GFM,
+      codeLanguages,
+      addKeymap: false,
+    }),
+    syntaxHighlighting(wendHighlightStyle),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+    EditorView.contentAttributes.of({
+      spellcheck: "false",
+      autocorrect: "off",
+      autocapitalize: "off",
+      autocomplete: "off",
+      inputmode: "text",
+      translate: "no",
+      "data-gramm": "false",
+      "data-gramm_editor": "false",
+      "data-enable-grammarly": "false",
+    }),
     livePreview,
     themeCompartment.of(buildTheme(theme)),
     EditorView.lineWrapping,
