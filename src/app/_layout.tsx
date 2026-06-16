@@ -30,6 +30,7 @@ import { useSessionBootstrap } from "@/auth/useSession";
 import { useAuthStore } from "@/store/authSlice";
 import { tokenCache } from "@/auth/tokenCache";
 import { clerkPublishableKey, isClerkConfigured } from "@/config/env";
+import { UpdateBanner } from "@/components/UpdateBanner";
 
 if (!isClerkConfigured) {
   // eslint-disable-next-line no-console
@@ -154,6 +155,7 @@ export default function RootLayout() {
              */}
             <StatusBar style="auto" />
             <AuthGate />
+            <UpdateBanner />
           </ThemeProvider>
         </QueryProvider>
       </SafeAreaProvider>
