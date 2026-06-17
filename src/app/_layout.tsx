@@ -31,6 +31,7 @@ import { useAuthStore } from "@/store/authSlice";
 import { tokenCache } from "@/auth/tokenCache";
 import { clerkPublishableKey, isClerkConfigured } from "@/config/env";
 import { UpdateBanner } from "@/components/UpdateBanner";
+import { SplashCover } from "@/components/SplashCover";
 import * as SystemUI from "expo-system-ui";
 
 // Paint the native root background paper so the brief window-bg flash during
@@ -116,12 +117,13 @@ function AuthGate() {
     }
   }, [status, segments, router]);
 
-  // While auth is unresolved, render nothing — the splash screen is still
-  // up (RootLayout keeps it visible until BOTH fonts and auth are ready).
-  // Mounting <Slot/> here would mount (app)'s layout and let its onboarding
-  // redirect fire before we know the user is signed out, which flashed the
-  // Connect-your-Mac screen on first cold start.
-  if (status === "loading") return null;
+  // While auth is unresolved, hold the branded cover. After an OTA reload the
+  // native splash is already gone, so returning null here is what made the
+  // long white gap while Clerk restores the session. The cover continues the
+  // splash look (paper + mark) until the route is ready. Mounting <Slot/> here
+  // would mount (app)'s layout and let its onboarding redirect fire before we
+  // know the user is signed out, which flashed the Connect-your-Mac screen.
+  if (status === "loading") return <SplashCover label="Updating Wend…" />;
 
   return <Slot />;
 }
@@ -139,7 +141,7 @@ export default function RootLayout() {
     }
   }, [fontsLoaded, fontError, authStatus]);
 
-  if (!fontsLoaded && !fontError) return null;
+  if (!fontsLoaded && !fontError) return <SplashCover />;
 
   // When Clerk's publishable key is missing we render the rest of the app
   // WITHOUT ClerkProvider — the empty-key path can crash Clerk's mount, and
