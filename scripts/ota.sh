@@ -15,9 +15,31 @@ set -euo pipefail
 
 MSG="${1:?usage: scripts/ota.sh \"<message>\" [branch]}"
 BRANCH="${2:-preview}"
-BASE="${EXPO_PUBLIC_RENDEZVOUS_BASE:-https://wend-landing.vercel.app}"
 
 cd "$(dirname "$0")/.."
+
+# CRITICAL: `eas update --environment <env>` resolves env vars from the EAS
+# environment STORE, which is empty for us — the EXPO_PUBLIC_* values live in
+# eas.json's build profiles. Exporting an empty Clerk key drops <ClerkProvider>
+# and crash-loops the app on launch. So we inline the build profile's
+# EXPO_PUBLIC_* vars into the shell here; Metro reads process.env at export
+# time and bakes them into the bundle. eas.json stays the single source.
+echo "→ Loading EXPO_PUBLIC_* from eas.json profile '$BRANCH'…"
+ENV_EXPORTS=$(BRANCH="$BRANCH" python3 - <<'PY'
+import json, os, shlex
+branch = os.environ["BRANCH"]
+with open("eas.json") as f:
+    cfg = json.load(f)
+env = (cfg.get("build", {}).get(branch, {}) or {}).get("env", {}) or {}
+pub = {k: v for k, v in env.items() if k.startswith("EXPO_PUBLIC_")}
+if not pub:
+    raise SystemExit(f"no EXPO_PUBLIC_* vars in eas.json build.{branch}.env")
+for k, v in pub.items():
+    print(f"export {k}={shlex.quote(str(v))}")
+PY
+)
+eval "$ENV_EXPORTS"
+echo "$ENV_EXPORTS" | sed 's/=.*/ ✓/'
 
 echo "→ Publishing OTA to branch '$BRANCH'…"
 npx eas update --branch "$BRANCH" --environment "$BRANCH" \
@@ -29,6 +51,7 @@ if [[ -z "${WEND_BROADCAST_SECRET:-}" ]]; then
   exit 0
 fi
 
+BASE="${EXPO_PUBLIC_RENDEZVOUS_BASE:-https://wend-landing.vercel.app}"
 echo "→ Broadcasting update push…"
 PAYLOAD=$(MSG="$MSG" python3 - <<'PY'
 import json, os
