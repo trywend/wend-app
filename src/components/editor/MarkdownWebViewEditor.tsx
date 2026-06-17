@@ -22,8 +22,10 @@ import {
   useImperativeHandle,
   useMemo,
   useRef,
+  useState,
 } from "react";
 import { View } from "react-native";
+import Animated, { FadeOut } from "react-native-reanimated";
 import type { StyleProp, ViewStyle } from "react-native";
 import { WebView } from "react-native-webview";
 import type { WebViewMessageEvent } from "react-native-webview";
@@ -99,6 +101,10 @@ export const MarkdownWebViewEditor = forwardRef<
 ) {
   const webRef = useRef<WebView>(null);
   const readyRef = useRef(false);
+  // `ready` drives the paper cover below; Android's WebView surface flashes
+  // dark while the ~500KB bundle loads (most visible right after an OTA
+  // reload), so we paint paper over it until CodeMirror reports `ready`.
+  const [ready, setReady] = useState(false);
   // The markdown the editor last reported. We treat this as the editor's
   // own view of the document so we can distinguish a genuine external change
   // (note switch / toolbar-free programmatic edit) from the controlled
@@ -177,6 +183,7 @@ export const MarkdownWebViewEditor = forwardRef<
       switch (msg.type) {
         case "ready": {
           readyRef.current = true;
+          setReady(true);
           // Re-apply theme + placeholder in case they changed between mount
           // and ready (injectedBefore captured them at mount).
           post({ type: "setTheme", theme });
@@ -217,7 +224,10 @@ export const MarkdownWebViewEditor = forwardRef<
   return (
     <View
       ref={hostRef}
-      style={[{ height: heightRef.current, overflow: "hidden" }, style]}
+      style={[
+        { height: heightRef.current, overflow: "hidden", backgroundColor: theme.paper },
+        style,
+      ]}
     >
       <WebView
         ref={webRef}
@@ -244,6 +254,20 @@ export const MarkdownWebViewEditor = forwardRef<
         setSupportMultipleWindows={false}
         javaScriptEnabled
       />
+      {!ready ? (
+        <Animated.View
+          exiting={FadeOut.duration(160)}
+          pointerEvents="none"
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: theme.paper,
+          }}
+        />
+      ) : null}
     </View>
   );
 });
