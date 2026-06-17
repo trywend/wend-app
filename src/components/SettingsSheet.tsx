@@ -31,6 +31,7 @@ import Animated, {
   SlideInDown,
   SlideOutDown,
 } from "react-native-reanimated";
+import { GestureDetector } from "react-native-gesture-handler";
 import {
   BellRingingIcon,
   CaretRightIcon,
@@ -57,6 +58,7 @@ import { useDaemonStore } from "@/store/daemonSlice";
 import { useCloudStore } from "@/store/cloudSlice";
 import { useSubscriptionStore } from "@/store/subscriptionSlice";
 import { useAndroidBack } from "@/lib/useAndroidBack";
+import { useSheetDrag } from "@/lib/useSheetDrag";
 
 /** Rendezvous backend that hosts the Linear OAuth routes. Kept inline
  *  for the same reason as in ConnectGitHubSheet — this file is in the
@@ -111,6 +113,7 @@ function SettingsSheetMounted({
   // See src/lib/useAndroidBack.ts — listener is LIFO so stacked sheets
   // (e.g. IntegrationsSheet over this one) win first.
   useAndroidBack(true, onClose);
+  const { pan, panelStyle, backdropStyle } = useSheetDrag(onClose);
   const { tokens } = useTheme();
   const preference = useUiStore((s) => s.themePreference);
   const setPreference = useUiStore((s) => s.setThemePreference);
@@ -280,14 +283,17 @@ function SettingsSheetMounted({
       <Animated.View
         entering={FadeIn.duration(220)}
         exiting={FadeOut.duration(180)}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: "rgba(0,0,0,0.22)",
-        }}
+        style={[
+          {
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0,0,0,0.22)",
+          },
+          backdropStyle,
+        ]}
       >
         <Pressable
           onPress={onClose}
@@ -297,7 +303,10 @@ function SettingsSheetMounted({
         />
       </Animated.View>
 
-      {/* Panel — same 88% height as InboxSheet so the stack looks consistent. */}
+      {/* Panel — same 88% height as InboxSheet so the stack looks consistent.
+          Two layers: outer node owns the slide-in/out layout animation, inner
+          node carries the gesture-driven drag transform (Fabric can't do both
+          on one node). */}
       <Animated.View
         entering={SlideInDown.duration(260)}
         exiting={SlideOutDown.duration(220)}
@@ -307,71 +316,84 @@ function SettingsSheetMounted({
           right: 0,
           bottom: 0,
           height: "88%",
-          backgroundColor: canvasBg,
-          borderTopLeftRadius: 32,
-          borderTopRightRadius: 32,
-          borderWidth: 1,
-          borderColor: borderColor,
-          shadowColor: "#000",
-          shadowOffset: { width: 0, height: -8 },
-          shadowOpacity: 0.08,
-          shadowRadius: 32,
-          elevation: 12,
-          overflow: "hidden",
         }}
       >
-        {/* Drag handle (decorative — no pan gesture on this sheet). */}
-        <View
-          style={{
-            width: "100%",
-            paddingTop: 12,
-            paddingBottom: 8,
-            alignItems: "center",
-          }}
+        <Animated.View
+          style={[
+            {
+              flex: 1,
+              backgroundColor: canvasBg,
+              borderTopLeftRadius: 32,
+              borderTopRightRadius: 32,
+              borderWidth: 1,
+              borderColor: borderColor,
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: -8 },
+              shadowOpacity: 0.08,
+              shadowRadius: 32,
+              elevation: 12,
+              overflow: "hidden",
+            },
+            panelStyle,
+          ]}
         >
-          <View
-            style={{
-              width: 36,
-              height: 4,
-              borderRadius: 999,
-              backgroundColor: tertiaryColor,
-            }}
-          />
-        </View>
-
-        {/* Header. */}
-        <View
-          style={{
-            paddingHorizontal: 24,
-            paddingVertical: 8,
-            flexDirection: "row",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
-          <Text variant="title" style={{ color: inkColor }}>
-            Settings
-          </Text>
-          <Pressable
-            onPress={onClose}
-            accessibilityRole="button"
-            accessibilityLabel="Close"
-            hitSlop={8}
-            style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
-          >
+        {/* Drag handle + header — the pan-gesture surface. The list below
+            scrolls independently so the two never compete. */}
+        <GestureDetector gesture={pan}>
+          <View>
             <View
               style={{
-                width: 32,
-                height: 32,
-                borderRadius: 16,
+                width: "100%",
+                paddingTop: 12,
+                paddingBottom: 8,
                 alignItems: "center",
-                justifyContent: "center",
               }}
             >
-              <XIcon size={20} color={subtleColor} weight="regular" />
+              <View
+                style={{
+                  width: 36,
+                  height: 4,
+                  borderRadius: 999,
+                  backgroundColor: tertiaryColor,
+                }}
+              />
             </View>
-          </Pressable>
-        </View>
+
+            {/* Header. */}
+            <View
+              style={{
+                paddingHorizontal: 24,
+                paddingVertical: 8,
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <Text variant="title" style={{ color: inkColor }}>
+                Settings
+              </Text>
+              <Pressable
+                onPress={onClose}
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+                hitSlop={8}
+                style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+              >
+                <View
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 16,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <XIcon size={20} color={subtleColor} weight="regular" />
+                </View>
+              </Pressable>
+            </View>
+          </View>
+        </GestureDetector>
 
         <ScrollView
           style={{ flex: 1 }}
@@ -766,6 +788,7 @@ function SettingsSheetMounted({
             </View>
           </Pressable>
         </ScrollView>
+        </Animated.View>
       </Animated.View>
     </View>
   );

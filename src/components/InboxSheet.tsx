@@ -33,22 +33,12 @@
 
 import { useMemo, useState } from "react";
 import { Pressable, View, ScrollView, ActivityIndicator } from "react-native";
-import {
-  Gesture,
-  GestureDetector,
-} from "react-native-gesture-handler";
+import { GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   FadeIn,
   FadeOut,
   SlideInDown,
   SlideOutDown,
-  interpolate,
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-  withTiming,
-  Extrapolation,
 } from "react-native-reanimated";
 import {
   CheckCircleIcon,
@@ -62,14 +52,7 @@ import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
 import { useNotesList, type NoteListItem } from "@/lib/notes/useNotesList";
 import { useAndroidBack } from "@/lib/useAndroidBack";
-
-const SPRING = { stiffness: 280, damping: 30, mass: 0.9 } as const;
-
-// Drag thresholds — keep generous so an accidental swipe-up while scrolling
-// the list doesn't close. The list itself owns vertical scrolling; the pan
-// gesture is scoped to the drag-handle area so it never competes.
-const DRAG_DISMISS_PX = 80;
-const DRAG_DISMISS_VELOCITY = 600;
+import { useSheetDrag } from "@/lib/useSheetDrag";
 
 type Filter = "all" | "running" | "done" | "notes";
 
@@ -110,39 +93,7 @@ function InboxSheetMounted({
   const { notes, isLoading } = useNotesList();
   const [filter, setFilter] = useState<Filter>("all");
 
-  // ------------------------------------------------------------------
-  // Drag-to-dismiss state — shared values driven by Pan on the handle.
-  // ------------------------------------------------------------------
-  const dragY = useSharedValue(0);
-
-  const panelStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: dragY.value }],
-  }));
-  const backdropStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(
-      dragY.value,
-      [0, 300],
-      [1, 0.2],
-      Extrapolation.CLAMP,
-    ),
-  }));
-
-  const pan = Gesture.Pan()
-    .onUpdate((e) => {
-      // Only follow positive (downward) drag — upward drag is a no-op so the
-      // sheet doesn't lift past its resting position.
-      dragY.value = Math.max(0, e.translationY);
-    })
-    .onEnd((e) => {
-      const past =
-        e.translationY > DRAG_DISMISS_PX || e.velocityY > DRAG_DISMISS_VELOCITY;
-      if (past) {
-        dragY.value = withTiming(0, { duration: 0 });
-        runOnJS(onClose)();
-      } else {
-        dragY.value = withSpring(0, SPRING);
-      }
-    });
+  const { pan, panelStyle, backdropStyle } = useSheetDrag(onClose);
 
   // ------------------------------------------------------------------
   // Filtering
@@ -210,32 +161,40 @@ function InboxSheetMounted({
         />
       </Animated.View>
 
-      {/* Sheet panel — 88% height, rounded top corners, slides up. */}
+      {/* Sheet panel — 88% height, rounded top corners, slides up.
+          Two layers: the outer node owns the slide-in/out layout animation,
+          the inner node carries the gesture-driven drag transform. On Fabric a
+          single node can't do both. */}
       <Animated.View
         entering={SlideInDown.duration(260)}
         exiting={SlideOutDown.duration(220)}
-        style={[
-          {
-            position: "absolute",
-            left: 0,
-            right: 0,
-            bottom: 0,
-            height: "88%",
-            backgroundColor: canvasBg,
-            borderTopLeftRadius: 32,
-            borderTopRightRadius: 32,
-            borderWidth: 1,
-            borderColor: borderColor,
-            shadowColor: "#000",
-            shadowOffset: { width: 0, height: -8 },
-            shadowOpacity: 0.08,
-            shadowRadius: 32,
-            elevation: 12,
-            overflow: "hidden",
-          },
-          panelStyle,
-        ]}
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: "88%",
+        }}
       >
+        <Animated.View
+          style={[
+            {
+              flex: 1,
+              backgroundColor: canvasBg,
+              borderTopLeftRadius: 32,
+              borderTopRightRadius: 32,
+              borderWidth: 1,
+              borderColor: borderColor,
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: -8 },
+              shadowOpacity: 0.08,
+              shadowRadius: 32,
+              elevation: 12,
+              overflow: "hidden",
+            },
+            panelStyle,
+          ]}
+        >
         {/* Drag handle row — only this area is the pan-gesture surface. The
             list scrolls independently below. */}
         <GestureDetector gesture={pan}>
@@ -403,6 +362,7 @@ function InboxSheetMounted({
             })
           )}
         </ScrollView>
+        </Animated.View>
       </Animated.View>
 
       {/* FAB — circular "+" pinned to the lower-right.
