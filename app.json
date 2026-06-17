@@ -39,7 +39,8 @@
         "ACCESS_WIFI_STATE",
         "CHANGE_WIFI_MULTICAST_STATE",
         "RECORD_AUDIO"
-      ]
+      ],
+      "backgroundColor": "#FBFAF7"
     },
     "notification": {
       "icon": "./assets/images/notification-icon.png",
@@ -112,6 +113,7 @@
     },
     "updates": {
       "url": "https://u.expo.dev/11c9f44b-135b-4daa-b042-13a46e9348e3"
-    }
+    },
+    "backgroundColor": "#FBFAF7"
   }
 }

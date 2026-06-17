@@ -31,6 +31,13 @@ import { useAuthStore } from "@/store/authSlice";
 import { tokenCache } from "@/auth/tokenCache";
 import { clerkPublishableKey, isClerkConfigured } from "@/config/env";
 import { UpdateBanner } from "@/components/UpdateBanner";
+import * as SystemUI from "expo-system-ui";
+
+// Paint the native root background paper so the brief window-bg flash during
+// an OTA reload (reloadAsync tears down all JS before the new bundle paints)
+// reads as paper, not the default dark. app.json `backgroundColor` covers the
+// pre-JS frame on the next native build; this covers it from JS meanwhile.
+void SystemUI.setBackgroundColorAsync("#FBFAF7");
 
 if (!isClerkConfigured) {
   // eslint-disable-next-line no-console
