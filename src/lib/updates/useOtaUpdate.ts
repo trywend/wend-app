@@ -59,7 +59,12 @@ export function useOtaUpdate(): OtaUpdateState {
 
   const restart = useCallback(() => {
     setRestarting(true);
-    Updates.reloadAsync().catch(() => setRestarting(false));
+    // Defer the reload one tick so the full-screen "Updating…" overlay paints
+    // before reloadAsync tears down the JS tree — otherwise the screen flashes
+    // blank during the reload. The native splash covers the rest of the reload.
+    setTimeout(() => {
+      Updates.reloadAsync().catch(() => setRestarting(false));
+    }, 350);
   }, []);
 
   return { updateReady: isUpdatePending, restart, restarting };

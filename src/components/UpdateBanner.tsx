@@ -8,10 +8,11 @@
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Animated, { SlideInUp, SlideOutUp } from "react-native-reanimated";
+import Animated, { FadeIn, SlideInUp, SlideOutUp } from "react-native-reanimated";
 import { ArrowClockwiseIcon, XIcon } from "phosphor-react-native";
 
 import { Text } from "@/components/primitives";
+import { WendMark } from "@/components/primitives/Logo";
 import { useTheme } from "@/theme/ThemeProvider";
 import { useOtaUpdate } from "@/lib/updates/useOtaUpdate";
 
@@ -26,14 +27,50 @@ export function UpdateBanner() {
     if (updateReady) setDismissed(false);
   }, [updateReady]);
 
-  if (!updateReady || dismissed) return null;
-
   const accent = tokens["accent-default"];
   const accentOn = tokens["accent-on"];
   const ink = tokens["text-primary"];
   const subtle = tokens["text-secondary"];
   const surface = tokens["surface-elevated"];
   const border = tokens["border-hairline"];
+
+  // Full-screen branded cover for the reload gap (reloadAsync blanks the JS
+  // tree for a beat). Stays until the native splash takes over.
+  if (restarting) {
+    return (
+      <Animated.View
+        entering={FadeIn.duration(120)}
+        pointerEvents="auto"
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 300,
+          backgroundColor: tokens["surface-canvas"],
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <WendMark height={56} inkColor={ink} />
+        <Text
+          style={{
+            marginTop: 22,
+            fontFamily: "Inter-Medium",
+            fontSize: 14,
+            color: subtle,
+            letterSpacing: -0.1,
+          }}
+        >
+          Updating Wend…
+        </Text>
+        <ActivityIndicator style={{ marginTop: 18 }} color={accent} />
+      </Animated.View>
+    );
+  }
+
+  if (!updateReady || dismissed) return null;
 
   return (
     <View
