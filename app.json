@@ -20,6 +20,7 @@
     "android": {
       "package": "app.trywend.wend",
       "versionCode": 1,
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#FBFAF7",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
