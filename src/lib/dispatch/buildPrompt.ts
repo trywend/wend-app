@@ -64,9 +64,17 @@
 
 import { parseCommand } from "@/lib/dispatch/commands";
 
+export type Intent =
+  | "command"
+  | "slash"
+  | "ticket"
+  | "question"
+  | "task"
+  | "idea";
+
 export interface BuiltPrompt {
   prompt: string;
-  intent: "command" | "slash" | "ticket" | "question" | "task" | "idea";
+  intent: Intent;
   rawNote: string;
 }
 
@@ -111,7 +119,7 @@ const TASK_KEYWORDS = [
 // task signal.
 const PATH_RE = /(^|\s)(\.\/|src\/|app\/|packages\/|lib\/|components\/|tests?\/)\S+/i;
 
-function detectIntent(note: string): BuiltPrompt["intent"] {
+export function detectIntent(note: string): BuiltPrompt["intent"] {
   const trimmed = note.trim();
   if (trimmed.length === 0) return "idea";
 

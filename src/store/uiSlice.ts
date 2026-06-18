@@ -25,6 +25,10 @@ interface UiState {
    * survives relaunch; no actual workspace connection yet. */
   linearConnected: boolean;
   setLinearConnected: (v: boolean) => void;
+  /** When true, a settled actionable note auto-fires after a 3s countdown.
+   * Off downgrades the arm bar to a one-tap "Wend it" pill (no countdown). */
+  autoWendOnSettle: boolean;
+  setAutoWendOnSettle: (v: boolean) => void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -41,11 +45,14 @@ export const useUiStore = create<UiState>()(
         set({ notificationsEnabled }),
       linearConnected: false,
       setLinearConnected: (linearConnected) => set({ linearConnected }),
+      autoWendOnSettle: true,
+      setAutoWendOnSettle: (autoWendOnSettle) => set({ autoWendOnSettle }),
     }),
     {
       // Bumped key — old "wend.ui" persisted "system" on first launch and would
-      // rehydrate over the new default. v2 forces a clean light default.
-      name: "wend.ui.v2",
+      // rehydrate over the new default. v2 forces a clean light default. v3
+      // seeds autoWendOnSettle=true so the arm bar defaults on.
+      name: "wend.ui.v3",
       storage: createJSONStorage(() => zustandStorage),
     },
   ),

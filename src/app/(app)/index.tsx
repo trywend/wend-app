@@ -30,6 +30,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  AccessibilityInfo,
   Alert,
   Image as RNImage,
   Keyboard,
@@ -50,7 +51,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   ArrowUpIcon,
-  CheckIcon,
   CodeIcon,
   DotsThreeVerticalIcon,
   LinkSimpleIcon,
@@ -66,7 +66,6 @@ import {
   TextHTwoIcon,
   TextItalicIcon,
   TrayIcon,
-  XIcon,
 } from "phosphor-react-native";
 
 import { useTheme } from "@/theme/ThemeProvider";
@@ -123,6 +122,9 @@ import {
   type AgentRunBlockState,
 } from "@/components/editor/AgentRunBlock";
 import { LiveMarkdownInput } from "@/components/editor/LiveMarkdownInput";
+import { ArmBar } from "@/components/editor/ArmBar";
+import { useArming } from "@/lib/dispatch/useArming";
+import { useUiStore } from "@/store/uiSlice";
 import type {
   EditorCommand,
   LiveMarkdownInputRef,
@@ -198,7 +200,25 @@ export default function HomeScreen() {
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
   const [paywall, setPaywall] = useState<PaywallReason | null>(null);
   const dispatchMode = useCloudStore((s) => s.dispatchMode);
+  const autoWendOnSettle = useUiStore((s) => s.autoWendOnSettle);
   useSubscriptionSync();
+
+  /* ─── Reduce-motion: read once + subscribe ───────────────────────── */
+  const [reduceMotion, setReduceMotion] = useState(false);
+  useEffect(() => {
+    let mounted = true;
+    void AccessibilityInfo.isReduceMotionEnabled().then((v) => {
+      if (mounted) setReduceMotion(v);
+    });
+    const sub = AccessibilityInfo.addEventListener(
+      "reduceMotionChanged",
+      setReduceMotion,
+    );
+    return () => {
+      mounted = false;
+      sub.remove();
+    };
+  }, []);
 
   /* ─── Deep-link: tap on a push notification opens the right note ──── */
   useEffect(() => {
@@ -352,14 +372,21 @@ export default function HomeScreen() {
     ],
   );
 
-  // Dispatch chip (S13 stub) — only meaningful before the first run when the
-  // user is still in the body field.
+  // Arm bar — the inline preview + consent surface. Evaluates the active
+  // dispatch target (body on first send, else the last follow-up). Pure-idea
+  // and incomplete text never arm; an armed bar counts down (auto) or waits
+  // for a tap (opt-down). force-send via the toolbar bypasses this entirely.
   const dispatchSignal = extractDispatchSignal(title, body);
-  const showChip =
-    !chipDismissed &&
-    isFirstSend &&
-    body.trim().length >= 12 &&
-    !isStreaming;
+  const arming = useArming({
+    text: nextPromptSource,
+    autoWend: autoWendOnSettle,
+    enabled: !isStreaming,
+    fire: () => void handleSend(),
+  });
+  const showArmBar = arming.phase === "armed" && !isStreaming;
+  const armTicket = isFirstSend
+    ? dispatchSignal
+    : extractDispatchSignal("", lastFollowUp);
 
   useEffect(() => {
     if (!hasContent && chipDismissed) setChipDismissed(false);
@@ -755,15 +782,6 @@ export default function HomeScreen() {
     // eslint-disable-next-line no-console
     console.log("[wend] stop tapped");
     cancel();
-  }
-
-  function handleConfirmChip() {
-    setChipDismissed(true);
-    void handleSend();
-  }
-
-  function handleDismissChip() {
-    setChipDismissed(true);
   }
 
   /* ─── Markdown toolbar insertion ────────────────────────────────────
@@ -1222,104 +1240,26 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
-        {/* ─── Confidence chip (S13) ──────────────────────────────────── */}
-        {showChip ? (
-          <Animated.View
-            entering={SlideInDown.springify().damping(15).mass(0.6)}
-            exiting={SlideOutDown.duration(180)}
-            style={{
-              position: "absolute",
-              left: 16,
-              right: 16,
-              bottom: TOOLBAR_HEIGHT + 12,
-              alignItems: "center",
-              zIndex: 40,
-              pointerEvents: "box-none",
-            }}
-            pointerEvents="box-none"
-          >
-            {/* Outer plain View owns ALL pill layout — Pressable
-                function-callback styles drop layout/visual props on
-                Android, so the tappable areas inside are Pressables
-                with static styles only. */}
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                maxWidth: "100%",
-                backgroundColor: tokens["surface-elevated"],
-                borderColor: borderColor,
-                borderWidth: 1,
-                borderRadius: 999,
-                paddingLeft: 16,
-                paddingRight: 8,
-                paddingVertical: 6,
-                shadowColor: "#000",
-                shadowOpacity: 0.1,
-                shadowRadius: 12,
-                shadowOffset: { width: 0, height: 4 },
-                elevation: 4,
-              }}
-            >
-              <Pressable
-                onPress={handleConfirmChip}
-                accessibilityRole="button"
-                accessibilityLabel="Send to Claude on Mac"
-                style={{
-                  flexShrink: 1,
-                  flexGrow: 0,
-                  marginRight: 10,
-                  justifyContent: "center",
-                }}
-              >
-                <Text
-                  style={{
-                    fontFamily: "Inter-Medium",
-                    fontSize: 13,
-                    color: inkColor,
-                  }}
-                  numberOfLines={1}
-                  ellipsizeMode="tail"
-                >
-                  Send to Claude{dispatchSignal ? ` (${dispatchSignal})` : ""} on Mac
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={handleDismissChip}
-                accessibilityRole="button"
-                accessibilityLabel="Dismiss suggestion"
-                hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
-                android_ripple={ANDROID_ICON_RIPPLE}
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 16,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  marginRight: 4,
-                  flexShrink: 0,
-                }}
-              >
-                <XIcon size={16} color={subtleColor} weight="bold" />
-              </Pressable>
-              <Pressable
-                onPress={handleConfirmChip}
-                accessibilityRole="button"
-                accessibilityLabel="Send to Claude on Mac"
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: 16,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  backgroundColor: accent,
-                  flexShrink: 0,
-                }}
-              >
-                <CheckIcon size={16} color={accentOn} weight="bold" />
-              </Pressable>
-            </View>
-          </Animated.View>
+        {/* ─── Arm bar — inline preview + reversible consent window ──────
+            Occupies the old chip's absolute slot above the toolbar. Renders
+            only when the active target text has settled, classified
+            actionable, and passed the completeness gate. The countdown (auto)
+            or the "Wend it" pill (opt-down) is the only undo — fire spawns the
+            real dispatch. Above the editor in z-order so it never fights the
+            autofocused input for touches. */}
+        {showArmBar ? (
+          <ArmBar
+            repoName={projectBasename(noteCwd)}
+            posture="read-only"
+            ticket={armTicket}
+            secondsLeft={arming.secondsLeft}
+            autoCountdown={autoWendOnSettle}
+            reduceMotion={reduceMotion}
+            bottomOffset={TOOLBAR_HEIGHT + 12}
+            onCancel={arming.cancel}
+            onFireNow={arming.fireNow}
+            onPickRepo={() => setRepoPickerOpen(true)}
+          />
         ) : null}
 
         {/* ─── Keyboard toolbar ─────────────────────────────────────────
@@ -1543,7 +1483,7 @@ export default function HomeScreen() {
                 disabled={!isStreaming && !canSend}
                 accessibilityRole="button"
                 accessibilityState={{ disabled: !isStreaming && !canSend }}
-                accessibilityLabel={isStreaming ? "Stop dispatch" : "Send note"}
+                accessibilityLabel={isStreaming ? "Stop dispatch" : "Wend it"}
                 android_ripple={Platform.select({
                   android: {
                     color: "rgba(255,255,255,0.20)",

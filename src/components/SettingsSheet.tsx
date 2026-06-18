@@ -35,6 +35,7 @@ import { GestureDetector } from "react-native-gesture-handler";
 import {
   BellRingingIcon,
   CaretRightIcon,
+  CrosshairIcon,
   CreditCardIcon,
   GithubLogoIcon,
   KanbanIcon,
@@ -119,6 +120,8 @@ function SettingsSheetMounted({
   const setPreference = useUiStore((s) => s.setThemePreference);
   const notificationsEnabled = useUiStore((s) => s.notificationsEnabled);
   const setNotificationsEnabled = useUiStore((s) => s.setNotificationsEnabled);
+  const autoWendOnSettle = useUiStore((s) => s.autoWendOnSettle);
+  const setAutoWendOnSettle = useUiStore((s) => s.setAutoWendOnSettle);
 
   // -----------------------------------------------------------------
   // GitHub connectivity status — driven by Clerk's externalAccounts.
@@ -722,6 +725,25 @@ function SettingsSheetMounted({
                 subtleColor={subtleColor}
                 tertiaryColor={tertiaryColor}
                 onPress={cycleTheme}
+              />
+              <Divider color={borderColor} />
+              <Row
+                Icon={CrosshairIcon}
+                label="Wend on settle"
+                subtitle="Fire when a thought lands. Off = tap to Wend."
+                inkColor={inkColor}
+                subtleColor={subtleColor}
+                tertiaryColor={tertiaryColor}
+                trailing={
+                  <Switch
+                    value={autoWendOnSettle}
+                    onValueChange={setAutoWendOnSettle}
+                    trackColor={{ false: borderColor, true: accent }}
+                    thumbColor={accentOn}
+                  />
+                }
+                onPress={() => setAutoWendOnSettle(!autoWendOnSettle)}
+                hideCaret
               />
               <Divider color={borderColor} />
               <Row
