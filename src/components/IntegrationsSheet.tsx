@@ -4,10 +4,10 @@
  * Stacks on top of SettingsSheet (z=70). Shows the full integration cards
  * with their detailed state. Two integrations:
  *
- *   - GitHub — connected status reflects Clerk's externalAccounts. Tap
- *     "Connect" to open the ConnectGitHubSheet (z=80) on top of this one.
- *     When connected, surfaces a "user/repo" placeholder (real repo binding
- *     lands when the daemon-side integration ships).
+ *   - GitHub — status reflects the single Wend Cloud App install (the same
+ *     connection cloud dispatch uses). Tap "Connect" to open the cloud install
+ *     flow. The old per-user OAuth integration was retired; the Mac path needs
+ *     no GitHub auth (it runs in your real repo).
  *   - Linear — visual-only toggle persisted in useUiStore.linearConnected.
  *     Always shows the toggle; no destination sheet yet.
  *
@@ -31,7 +31,7 @@ import {
   KanbanIcon,
   type Icon as PhosphorIcon,
 } from "phosphor-react-native";
-import { useUser } from "@clerk/clerk-expo";
+import { useCloudStore } from "@/store/cloudSlice";
 
 import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
@@ -61,12 +61,10 @@ function IntegrationsSheetMounted({
   const linearConnected = useUiStore((s) => s.linearConnected);
   const setLinearConnected = useUiStore((s) => s.setLinearConnected);
 
-  const { user } = useUser();
-  const githubAccount = user?.externalAccounts?.find(
-    (a) => a.provider === "github",
-  );
-  const githubConnected = githubAccount != null;
-  const githubHandle = githubAccount?.username ?? null;
+  // GitHub status = the single Wend Cloud App install (same connection cloud
+  // dispatch uses). The old per-user OAuth integration was retired.
+  const githubConnected = useCloudStore((s) => s.githubConnected);
+  const githubHandle = useCloudStore((s) => s.githubLogin);
 
   const canvasBg = tokens["surface-canvas"];
   const cardBg = tokens["surface-elevated"];
@@ -197,7 +195,7 @@ function IntegrationsSheetMounted({
             Icon={GithubLogoIcon}
             name="GitHub"
             connected={githubConnected}
-            connectedDetail={githubHandle ? `${githubHandle}/repo` : null}
+            connectedDetail={githubHandle ? `@${githubHandle}` : null}
             cardBg={cardBg}
             borderColor={borderColor}
             inkColor={inkColor}

@@ -108,7 +108,6 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { InboxSheet } from "@/components/InboxSheet";
 import { SettingsSheet } from "@/components/SettingsSheet";
 import { IntegrationsSheet } from "@/components/IntegrationsSheet";
-import { ConnectGitHubSheet } from "@/components/ConnectGitHubSheet";
 import { ConnectMacSheet } from "@/components/ConnectMacSheet";
 import { ConnectAnthropicSheet } from "@/components/ConnectAnthropicSheet";
 import { CloudGitHubSheet } from "@/components/CloudGitHubSheet";
@@ -193,7 +192,6 @@ export default function HomeScreen() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [integrationsOpen, setIntegrationsOpen] = useState(false);
-  const [connectGitHubOpen, setConnectGitHubOpen] = useState(false);
   const [connectMacOpen, setConnectMacOpen] = useState(false);
   const [connectAnthropicOpen, setConnectAnthropicOpen] = useState(false);
   const [cloudGitHubOpen, setCloudGitHubOpen] = useState(false);
@@ -1607,16 +1605,7 @@ export default function HomeScreen() {
       <IntegrationsSheet
         open={integrationsOpen}
         onClose={() => setIntegrationsOpen(false)}
-        onConnectGitHub={() => setConnectGitHubOpen(true)}
-      />
-      <ConnectGitHubSheet
-        open={connectGitHubOpen}
-        onClose={() => setConnectGitHubOpen(false)}
-        onAuthorize={() => {
-          // eslint-disable-next-line no-console
-          console.log("[wend] GitHub authorize tapped");
-          setConnectGitHubOpen(false);
-        }}
+        onConnectGitHub={() => setCloudGitHubOpen(true)}
       />
       <ConnectMacSheet
         open={connectMacOpen}

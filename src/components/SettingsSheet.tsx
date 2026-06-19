@@ -48,7 +48,7 @@ import {
   XIcon,
   type Icon as PhosphorIcon,
 } from "phosphor-react-native";
-import { useAuth, useUser } from "@clerk/clerk-expo";
+import { useAuth } from "@clerk/clerk-expo";
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
 
@@ -123,20 +123,10 @@ function SettingsSheetMounted({
   const autoWendOnSettle = useUiStore((s) => s.autoWendOnSettle);
   const setAutoWendOnSettle = useUiStore((s) => s.setAutoWendOnSettle);
 
-  // -----------------------------------------------------------------
-  // GitHub connectivity status — driven by Clerk's externalAccounts.
-  // We only treat the user as "connected via GitHub" if their session has a
-  // verified github external account. The username comes from that account;
-  // we fall back to the primary email when missing (rare but possible).
-  // -----------------------------------------------------------------
-  const { user } = useUser();
-  const githubAccount = user?.externalAccounts?.find(
-    (a) => a.provider === "github",
-  );
-  const githubConnected = githubAccount != null;
-  const githubLabel = githubConnected
-    ? githubAccount?.username ?? user?.primaryEmailAddress?.emailAddress ?? "Connected"
-    : null;
+  // GitHub status now reflects the single Wend Cloud App install
+  // (cloudGithubConnected/cloudGithubLogin above) — the same connection cloud
+  // dispatch uses. The old per-user OAuth integration was retired; the Mac
+  // path needs no GitHub auth (it runs in your real repo).
 
   // Mac pairing — live from the daemon slice. When `host` is set the user
   // has scanned a QR from Wend.app at least once. The subtitle shows the
@@ -487,16 +477,16 @@ function SettingsSheetMounted({
                   Icon={GithubLogoIcon}
                   label="GitHub"
                   subtitle={
-                    githubConnected
-                      ? `Active · ${githubLabel ?? ""}`
-                      : "Not connected"
+                    cloudGithubConnected
+                      ? `Installed · ${cloudGithubLogin ? `@${cloudGithubLogin}` : "your account"}`
+                      : "Connect for cloud dispatch"
                   }
                   inkColor={inkColor}
                   subtleColor={subtleColor}
                   tertiaryColor={tertiaryColor}
-                  onPress={onOpenIntegrations}
+                  onPress={onConnectCloudGitHub ?? (() => {})}
                   trailing={
-                    githubConnected ? (
+                    cloudGithubConnected ? (
                       <StatusPip
                         label="Active"
                         color={tokens["status-done"]}
