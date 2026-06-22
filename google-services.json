@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "793196380303",
+    "project_id": "wend-e9e8d",
+    "storage_bucket": "wend-e9e8d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:793196380303:android:4d2d36e9580269373b70fa",
+        "android_client_info": {
+          "package_name": "app.trywend.wend"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDbc7KL4T9wFYqJvHBhf0QpXVIyQ_1BBiw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
