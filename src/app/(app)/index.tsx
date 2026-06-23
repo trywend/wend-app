@@ -2103,7 +2103,9 @@ async function generateAutoTitle(args: {
     const res = await expoFetch(url, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ prompt }),
+      // ephemeral: the daemon streams the answer but never archives this as a
+      // note or fires a completion push — it's an internal title-gen call.
+      body: JSON.stringify({ prompt, ephemeral: true }),
     });
     if (!res.ok || !res.body) return null;
     const reader = res.body.getReader();

@@ -76,6 +76,7 @@ import {
 } from "phosphor-react-native";
 
 import { Text } from "@/components/primitives";
+import { HighlightedCode } from "@/components/HighlightedCode";
 import { useTheme } from "@/theme/ThemeProvider";
 import { useResolvedDaemonURL } from "@/lib/dispatch/useResolvedDaemonURL";
 import { useAndroidBack } from "@/lib/useAndroidBack";
@@ -154,7 +155,7 @@ function Mounted({
   content,
   editExcerpt,
 }: FileViewerModalProps) {
-  const { tokens } = useTheme();
+  const { tokens, scheme } = useTheme();
   // Android hardware back closes the viewer.
   useAndroidBack(true, onClose);
 
@@ -411,6 +412,8 @@ function Mounted({
           {hasEmbeddedContent ? (
             <TextContentView
               content={content!}
+              filename={displayName}
+              scheme={scheme}
               ink={ink}
               tertiary={tertiary}
               surface={surface}
@@ -420,6 +423,8 @@ function Mounted({
             <MacFileBody
               path={path}
               kind={kind}
+              filename={displayName}
+              scheme={scheme}
               editExcerpt={editExcerpt}
               ink={ink}
               subtle={subtle}
@@ -444,6 +449,8 @@ function Mounted({
           ) : kind === "text" ? (
             <TextFileView
               uri={path}
+              filename={displayName}
+              scheme={scheme}
               ink={ink}
               subtle={subtle}
               tertiary={tertiary}
@@ -589,12 +596,16 @@ const TEXT_PREVIEW_MAX = 200 * 1024;
 
 function TextContentView({
   content,
+  filename,
+  scheme,
   ink,
   tertiary,
   surface,
   border,
 }: {
   content: string;
+  filename: string;
+  scheme: "light" | "dark";
   ink: string;
   tertiary: string;
   surface: string;
@@ -631,23 +642,20 @@ function TextContentView({
           </Text>
         </View>
       ) : null}
-      <Text
-        style={{
-          fontFamily: "JetBrainsMono",
-          fontSize: 12.5,
-          lineHeight: 19,
-          color: ink,
-        }}
-        selectable
-      >
-        {shown}
-      </Text>
+      <HighlightedCode
+        code={shown}
+        filename={filename}
+        scheme={scheme}
+        ink={ink}
+      />
     </ScrollView>
   );
 }
 
 function TextFileView({
   uri,
+  filename,
+  scheme,
   ink,
   subtle,
   tertiary,
@@ -655,6 +663,8 @@ function TextFileView({
   border,
 }: {
   uri: string;
+  filename: string;
+  scheme: "light" | "dark";
   ink: string;
   subtle: string;
   tertiary: string;
@@ -721,6 +731,8 @@ function TextFileView({
   return (
     <TextContentView
       content={content}
+      filename={filename}
+      scheme={scheme}
       ink={ink}
       tertiary={tertiary}
       surface={surface}
@@ -757,6 +769,8 @@ type MacFetchState =
 function MacFileBody({
   path,
   kind,
+  filename,
+  scheme,
   editExcerpt,
   ink,
   subtle,
@@ -768,6 +782,8 @@ function MacFileBody({
 }: {
   path: string;
   kind: AttachmentKind;
+  filename: string;
+  scheme: "light" | "dark";
   editExcerpt?: string;
   ink: string;
   subtle: string;
@@ -909,6 +925,8 @@ function MacFileBody({
       return (
         <TextContentView
           content={state.content}
+          filename={filename}
+          scheme={scheme}
           ink={ink}
           tertiary={tertiary}
           surface={surface}
