@@ -303,6 +303,10 @@ export function useDispatch(): UseDispatchResult {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           prompt: built.prompt,
+          // The raw note the user wrote — what the Mac archives + displays.
+          // `prompt` carries the deterministic system framing so claude has
+          // phone-message intent; that framing must never resurface as a note.
+          displayPrompt: args.prompt,
           cwd: args.cwd ?? daemonCwd ?? undefined,
           sessionId: args.sessionId,
           // Push notification context. The Mac daemon fires an Expo
