@@ -17,13 +17,22 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Pressable, View, Animated as RNAnimated } from "react-native";
+import { Pressable, Share, View, Animated as RNAnimated } from "react-native";
 import { useRouter } from "expo-router";
 import Animated, {
   FadeIn,
   FadeInDown,
 } from "react-native-reanimated";
-import { CloudIcon, LaptopIcon, QrCodeIcon } from "phosphor-react-native";
+import {
+  CloudIcon,
+  DownloadSimpleIcon,
+  LaptopIcon,
+  QrCodeIcon,
+} from "phosphor-react-native";
+
+/** Where the Mac app lives. The /download page handles the unsigned-app
+ *  first-launch instructions and serves the EdDSA-signed DMG. */
+const MAC_DOWNLOAD_URL = "https://wend-landing.vercel.app/download";
 
 import { Text } from "@/components/primitives";
 import { WendMark } from "@/components/primitives/Logo";
@@ -90,6 +99,23 @@ export default function OnboardingScreen() {
   function handleSkip() {
     skipPairing();
     router.replace("/(app)");
+  }
+
+  // Get the Mac app onto the Mac. iOS can't install software on a Mac (no
+  // cross-device install API exists), so the frictionless path is the OS
+  // share sheet: on iOS this surfaces AirDrop — one tap beams the download
+  // link to the user's Mac, which opens it in Safari. Mail / Messages / Copy
+  // are the fallbacks (and the cross-platform path on Android).
+  async function handleGetMacApp() {
+    try {
+      await Share.share({
+        title: "Get Wend for Mac",
+        message: `Install Wend for your Mac, then come back and scan the pairing QR.\n${MAC_DOWNLOAD_URL}`,
+        url: MAC_DOWNLOAD_URL,
+      });
+    } catch {
+      // User dismissed the share sheet — no-op.
+    }
   }
 
   const ink = tokens["text-primary"];
@@ -264,6 +290,35 @@ export default function OnboardingScreen() {
             </Text>
           </View>
         </Pressable>
+
+        {!paired ? (
+          <Pressable
+            onPress={handleGetMacApp}
+            accessibilityRole="button"
+            accessibilityLabel="Get Wend for your Mac"
+            hitSlop={8}
+            style={({ pressed }) => ({
+              marginTop: 14,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+              opacity: pressed ? 0.6 : 1,
+            })}
+          >
+            <DownloadSimpleIcon size={15} color={subtle} weight="bold" />
+            <Text
+              style={{
+                fontFamily: "Inter-Medium",
+                fontSize: 13.5,
+                color: subtle,
+                letterSpacing: -0.1,
+              }}
+            >
+              Don't have Wend on your Mac? Get it
+            </Text>
+          </Pressable>
+        ) : null}
 
         <Pressable
           onPress={startCloud}
