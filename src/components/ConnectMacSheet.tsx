@@ -29,6 +29,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   TextInput,
   View,
 } from "react-native";
@@ -69,6 +70,7 @@ import Animated, {
 } from "react-native-reanimated";
 import {
   CheckCircleIcon,
+  DownloadSimpleIcon,
   GearIcon,
   LaptopIcon,
   QrCodeIcon,
@@ -235,6 +237,10 @@ type Mode =
   | "success"
   | "error"
   | "manual";
+
+/** Where the Mac app lives. The /download page serves the signed DMG and the
+ *  unsigned-app first-launch instructions. */
+const MAC_DOWNLOAD_URL = "https://wend-landing.vercel.app/download";
 
 export function ConnectMacSheet(
   props: ConnectMacSheetProps,
@@ -528,6 +534,22 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
     setTimeout(onClose, 1400);
   }
 
+  // Get the Mac app onto the Mac. iOS can't install software on a Mac, so the
+  // share sheet (AirDrop on iOS) is the frictionless handoff — beam the
+  // /download link to the user's Mac. Surfaced here too because this is where
+  // someone realizes they don't have the app to scan a QR from yet.
+  async function handleGetMacApp() {
+    try {
+      await Share.share({
+        title: "Get Wend for Mac",
+        message: `Install Wend for your Mac, then come back and scan the pairing QR.\n${MAC_DOWNLOAD_URL}`,
+        url: MAC_DOWNLOAD_URL,
+      });
+    } catch {
+      // User dismissed the share sheet — no-op.
+    }
+  }
+
   const ink = tokens["text-primary"];
   const subtle = tokens["text-secondary"];
   const tertiary = tokens["text-tertiary"];
@@ -803,6 +825,37 @@ function ConnectMacMounted({ open, onClose }: ConnectMacSheetProps) {
             />
           )}
         </View>
+
+        {/* Persistent footer — getting the Mac app is the implicit
+            prerequisite for scanning its QR. */}
+        <Pressable
+          onPress={handleGetMacApp}
+          accessibilityRole="button"
+          accessibilityLabel="Get Wend for your Mac"
+          hitSlop={8}
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            paddingVertical: 14,
+            borderTopWidth: 1,
+            borderTopColor: border,
+            opacity: pressed ? 0.6 : 1,
+          })}
+        >
+          <DownloadSimpleIcon size={15} color={subtle} weight="bold" />
+          <Text
+            style={{
+              fontFamily: "Inter-Medium",
+              fontSize: 13.5,
+              color: subtle,
+              letterSpacing: -0.1,
+            }}
+          >
+            Don't have Wend on your Mac? Get it
+          </Text>
+        </Pressable>
       </Animated.View>
     </View>
   );
