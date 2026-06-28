@@ -37,6 +37,7 @@ import { useResolvedDaemonURL } from "@/lib/dispatch/useResolvedDaemonURL";
 import { buildPrompt } from "@/lib/dispatch/buildPrompt";
 import { useCloudStore, effectiveDispatchTarget } from "@/store/cloudSlice";
 import { useNotificationsStore } from "@/store/notificationsSlice";
+import { getInstallId } from "@/lib/installId";
 import { useSubscriptionStore, canDispatch } from "@/store/subscriptionSlice";
 import { cloudDispatchViaWebSocket } from "@/lib/dispatch/cloudDispatch";
 import { uploadAttachmentToDaemon } from "@/lib/attachments";
@@ -313,12 +314,35 @@ export function useDispatch(): UseDispatchResult {
           // push to this token when claude exits so the user knows the
           // run is done without keeping the app open.
           pushToken: pushToken || undefined,
+          // Stable phone identity — the Mac hard-revokes a disconnected
+          // phone by installId and 403s its dispatches.
+          installId: await getInstallId(),
           noteId: args.noteId,
           noteTitle: args.noteTitle,
           attachments: uploadedAttachments.length ? uploadedAttachments : undefined,
         }),
         signal: controller.signal,
       });
+
+      // Disconnected from this Mac: the daemon revoked this phone. Drop the
+      // pairing so the app falls back to the pair-your-Mac flow.
+      if (res.status === 403) {
+        let revoked = false;
+        try {
+          revoked = (await res.text()).includes("revoked");
+        } catch {
+          revoked = false;
+        }
+        if (revoked) {
+          useDaemonStore.getState().clear();
+          args.onEvent({
+            type: "error",
+            message:
+              "This phone was disconnected from your Mac. Pair again to keep Wending.",
+          });
+          return;
+        }
+      }
 
       if (!res.ok) {
         args.onEvent({
