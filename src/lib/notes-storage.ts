@@ -294,6 +294,9 @@ export async function loadOrCreateDraftNote(
     const idleMs = Date.now() - existing.updatedAt;
     if (idleMs < IDLE_NEW_DRAFT_MS) {
       const block = await readBodyBlock(existing.id);
+      // Sweep abandoned blank drafts (and backfill the existing pile), but
+      // keep the one we're resuming.
+      await pruneEmptyNotes(userId, existing.id);
       return {
         note: existing,
         bodyText: block?.content.text ?? "",
@@ -309,6 +312,9 @@ export async function loadOrCreateDraftNote(
   const block = makeEmptyBlock(note.id);
   await writeIndex([note, ...all]);
   await writeBodyBlock(block);
+  // Sweep abandoned blank drafts (and backfill the pile), keeping this fresh
+  // one so the editor has something to land on.
+  await pruneEmptyNotes(userId, note.id);
   bumpNotesVersion();
   return { note, bodyText: "", runs: [] };
 }
@@ -336,6 +342,9 @@ export async function createNote(
   const all = await readIndex();
   await writeIndex([note, ...all]);
   await writeBodyBlock(block);
+  // Tapping "+ new note" repeatedly shouldn't leave a trail of blank drafts —
+  // prune the prior empties, keeping only this fresh one.
+  await pruneEmptyNotes(userId, note.id);
   bumpNotesVersion();
   return { note, bodyText: "", runs: [] };
 }
@@ -458,4 +467,47 @@ export async function deleteNote(id: string): Promise<void> {
   await writeIndex(next);
   await removeBodyBlock(id);
   bumpNotesVersion();
+}
+
+/**
+ * Delete empty drafts — notes with no title, no body text, no runs, and no
+ * attachments. The editor eagerly creates a note when it opens, so an
+ * abandoned (never-typed) draft would otherwise linger in the inbox as
+ * "Untitled" and accumulate over time. `exceptId` keeps the currently-open
+ * draft alive. Also serves as a one-time backfill for the pile that already
+ * built up. Returns the count removed.
+ */
+export async function pruneEmptyNotes(
+  userId: string,
+  exceptId?: string,
+): Promise<number> {
+  const all = await readIndex();
+  const survivors: Note[] = [];
+  const removed: string[] = [];
+  for (const n of all) {
+    if (
+      n.userId !== userId ||
+      n.archivedAt != null ||
+      n.id === exceptId ||
+      n.title.trim().length > 0 ||
+      (n.attachments?.length ?? 0) > 0
+    ) {
+      survivors.push(n);
+      continue;
+    }
+    const block = await readBodyBlock(n.id);
+    const hasBody = (block?.content.text ?? "").trim().length > 0;
+    const hasRuns = (block?.content.runs?.length ?? 0) > 0;
+    if (hasBody || hasRuns) {
+      survivors.push(n);
+      continue;
+    }
+    removed.push(n.id);
+  }
+  if (removed.length > 0) {
+    await writeIndex(survivors);
+    for (const id of removed) await removeBodyBlock(id);
+    bumpNotesVersion();
+  }
+  return removed.length;
 }
