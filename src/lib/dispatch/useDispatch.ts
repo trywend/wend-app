@@ -541,9 +541,21 @@ async function dispatchCloud(
 
 /* ───── SSE stream reading + resume protocol ─────────────────────────── */
 
-/** Backoff schedule for resume attempts. After the last window we give up
- *  and surface the original stream error. */
-const RESUME_BACKOFF_MS = [1_000, 2_000, 4_000, 8_000, 15_000];
+/** Backoff schedule for resume attempts (~3 min total before giving up).
+ *  Cellular handoffs can take a while to settle, so we stay patient rather
+ *  than surfacing a hard "connection lost" after ~30s. A foreground or
+ *  network-regain event short-circuits the current wait (see
+ *  waitForRetryWindow), so a user looking at the screen reconnects instantly. */
+const RESUME_BACKOFF_MS = [
+  1_000, 2_000, 4_000, 8_000, 12_000, 15_000, 20_000, 30_000, 30_000, 30_000,
+  30_000,
+];
+
+/** ±25% jitter so many phones (or repeated attempts) don't all retry in
+ *  lockstep into the same dead network window. */
+function jitter(ms: number): number {
+  return Math.round(ms * (0.875 + Math.random() * 0.25));
+}
 
 type SseBody = {
   getReader(): {
@@ -634,7 +646,7 @@ async function resumeRunStream(ctx: {
     // Re-announce before every attempt — a partially successful attempt
     // may have streamed frames that cleared the consumer's banner.
     ctx.onEvent({ type: "reconnecting" });
-    await waitForRetryWindow(backoffMs, ctx.signal);
+    await waitForRetryWindow(jitter(backoffMs), ctx.signal);
     if (ctx.signal.aborted) return false;
 
     const fresh = await ctx.refresh().catch(() => null);

@@ -297,7 +297,7 @@ export function AgentRunBlock({
                 color: tertiary,
               }}
             >
-              Reconnecting…
+              Reconnecting to your Mac…
             </Text>
           ) : null}
 
