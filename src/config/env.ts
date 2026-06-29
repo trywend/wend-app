@@ -33,3 +33,13 @@ export const daemonCwd = process.env.EXPO_PUBLIC_DAEMON_CWD ?? "";
 
 export const isDaemonConfigured =
   daemonUrl.length > 0 && daemonToken.length > 0;
+
+/**
+ * Cloud dispatch feature gate. OFF by default — the cloud backend is
+ * unavailable (AWS plan restriction), so we ship Mac + phone only and hide
+ * every cloud surface (onboarding option, Settings toggle, cloud GitHub /
+ * Anthropic, and the dispatch route). Flip on by setting
+ * EXPO_PUBLIC_CLOUD_ENABLED=1 in eas.json and re-publishing once cloud is
+ * back — it's baked into the bundle, so an OTA propagates it.
+ */
+export const cloudEnabled = process.env.EXPO_PUBLIC_CLOUD_ENABLED === "1";

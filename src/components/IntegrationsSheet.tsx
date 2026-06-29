@@ -32,6 +32,7 @@ import {
   type Icon as PhosphorIcon,
 } from "phosphor-react-native";
 import { useCloudStore } from "@/store/cloudSlice";
+import { cloudEnabled } from "@/config/env";
 
 import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
@@ -190,27 +191,30 @@ function IntegrationsSheetMounted({
           }}
           showsVerticalScrollIndicator={false}
         >
-          {/* GitHub card. */}
-          <IntegrationCard
-            Icon={GithubLogoIcon}
-            name="GitHub"
-            connected={githubConnected}
-            connectedDetail={githubHandle ? `@${githubHandle}` : null}
-            cardBg={cardBg}
-            borderColor={borderColor}
-            inkColor={inkColor}
-            subtleColor={subtleColor}
-            tertiaryColor={tertiaryColor}
-            chipBg={chipBg}
-            statusDoneColor={statusDoneColor}
-            accent={accent}
-            onConnect={onConnectGitHub}
-            onConfigure={() => {
-              // Configure flow not yet built — falls through to ConnectGitHub
-              // for now (it explains what we'd ask for).
-              onConnectGitHub();
-            }}
-          />
+          {/* GitHub card — cloud-only (the Wend Cloud App install). Hidden
+              while cloud is feature-gated off. */}
+          {cloudEnabled ? (
+            <IntegrationCard
+              Icon={GithubLogoIcon}
+              name="GitHub"
+              connected={githubConnected}
+              connectedDetail={githubHandle ? `@${githubHandle}` : null}
+              cardBg={cardBg}
+              borderColor={borderColor}
+              inkColor={inkColor}
+              subtleColor={subtleColor}
+              tertiaryColor={tertiaryColor}
+              chipBg={chipBg}
+              statusDoneColor={statusDoneColor}
+              accent={accent}
+              onConnect={onConnectGitHub}
+              onConfigure={() => {
+                // Configure flow not yet built — falls through to ConnectGitHub
+                // for now (it explains what we'd ask for).
+                onConnectGitHub();
+              }}
+            />
+          ) : null}
 
           {/* Linear card — toggle-only. */}
           <View

@@ -57,6 +57,7 @@ import { useTheme } from "@/theme/ThemeProvider";
 import { useUiStore, type ThemePreference } from "@/store/uiSlice";
 import { useDaemonStore } from "@/store/daemonSlice";
 import { useCloudStore } from "@/store/cloudSlice";
+import { cloudEnabled } from "@/config/env";
 import { useSubscriptionStore } from "@/store/subscriptionSlice";
 import { useAndroidBack } from "@/lib/useAndroidBack";
 import { useSheetDrag } from "@/lib/useSheetDrag";
@@ -472,33 +473,37 @@ function SettingsSheetMounted({
                     )
                   }
                 />
-                <Divider color={borderColor} />
-                <Row
-                  Icon={GithubLogoIcon}
-                  label="GitHub"
-                  subtitle={
-                    cloudGithubConnected
-                      ? `Installed · ${cloudGithubLogin ? `@${cloudGithubLogin}` : "your account"}`
-                      : "Connect for cloud dispatch"
-                  }
-                  inkColor={inkColor}
-                  subtleColor={subtleColor}
-                  tertiaryColor={tertiaryColor}
-                  onPress={onConnectCloudGitHub ?? (() => {})}
-                  trailing={
-                    cloudGithubConnected ? (
-                      <StatusPip
-                        label="Active"
-                        color={tokens["status-done"]}
-                      />
-                    ) : (
-                      <SmallButtonText
-                        label="Connect"
-                        color={accent}
-                      />
-                    )
-                  }
-                />
+                {cloudEnabled ? (
+                  <>
+                    <Divider color={borderColor} />
+                    <Row
+                      Icon={GithubLogoIcon}
+                      label="GitHub"
+                      subtitle={
+                        cloudGithubConnected
+                          ? `Installed · ${cloudGithubLogin ? `@${cloudGithubLogin}` : "your account"}`
+                          : "Connect for cloud dispatch"
+                      }
+                      inkColor={inkColor}
+                      subtleColor={subtleColor}
+                      tertiaryColor={tertiaryColor}
+                      onPress={onConnectCloudGitHub ?? (() => {})}
+                      trailing={
+                        cloudGithubConnected ? (
+                          <StatusPip
+                            label="Active"
+                            color={tokens["status-done"]}
+                          />
+                        ) : (
+                          <SmallButtonText
+                            label="Connect"
+                            color={accent}
+                          />
+                        )
+                      }
+                    />
+                  </>
+                ) : null}
                 <Divider color={borderColor} />
                 <Row
                   Icon={KanbanIcon}
@@ -575,7 +580,7 @@ function SettingsSheetMounted({
               Two opt-in connections that unlock cloud-dispatch as a
               fallback when no Mac is paired. Both are skippable; the
               Mac path keeps working without them. */}
-          {(onConnectAnthropic || onConnectCloudGitHub) ? (
+          {cloudEnabled && (onConnectAnthropic || onConnectCloudGitHub) ? (
             <Section title="Cloud" subtleColor={subtleColor}>
               <SectionCard cardBg={cardBg} borderColor={borderColor}>
                 <View

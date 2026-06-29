@@ -16,6 +16,8 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
+import { cloudEnabled } from "@/config/env";
+
 export type DispatchMode = "mac" | "cloud";
 
 export interface CloudState {
@@ -97,5 +99,8 @@ export function effectiveDispatchTarget(
   s: CloudState,
   _args: { macPaired: boolean },
 ): DispatchMode {
+  // Cloud is feature-gated off — every dispatch routes to the Mac regardless
+  // of any stored (or stale) cloud preference.
+  if (!cloudEnabled) return "mac";
   return s.dispatchMode;
 }

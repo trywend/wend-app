@@ -40,6 +40,7 @@ import { useTheme } from "@/theme/ThemeProvider";
 import { useDaemonStore } from "@/store/daemonSlice";
 import { useOnboardingStore } from "@/store/onboardingSlice";
 import { useCloudStore } from "@/store/cloudSlice";
+import { cloudEnabled } from "@/config/env";
 import { ConnectMacSheet } from "@/components/ConnectMacSheet";
 import { ConnectAnthropicSheet } from "@/components/ConnectAnthropicSheet";
 import { CloudGitHubSheet } from "@/components/CloudGitHubSheet";
@@ -80,6 +81,7 @@ export default function OnboardingScreen() {
 
   // Auto-route when both cloud connections finish, same beat as Mac.
   useEffect(() => {
+    if (!cloudEnabled) return;
     if (!cloudReady) return;
     setDispatchMode("cloud");
     const t = setTimeout(() => router.replace("/(app)"), 600);
@@ -320,42 +322,44 @@ export default function OnboardingScreen() {
           </Pressable>
         ) : null}
 
-        <Pressable
-          onPress={startCloud}
-          accessibilityRole="button"
-          accessibilityLabel="Use cloud agents instead"
-          disabled={paired}
-          style={{
-            marginTop: 12,
-            opacity: paired ? 0 : 1,
-          }}
-        >
-          <View
+        {cloudEnabled ? (
+          <Pressable
+            onPress={startCloud}
+            accessibilityRole="button"
+            accessibilityLabel="Use cloud agents instead"
+            disabled={paired}
             style={{
-              height: 56,
-              borderRadius: 14,
-              backgroundColor: elev,
-              borderWidth: 1,
-              borderColor: border,
-              alignItems: "center",
-              justifyContent: "center",
-              flexDirection: "row",
-              gap: 10,
+              marginTop: 12,
+              opacity: paired ? 0 : 1,
             }}
           >
-            <CloudIcon size={20} color={ink} weight="regular" />
-            <Text
+            <View
               style={{
-                fontFamily: "Inter-SemiBold",
-                fontSize: 16,
-                color: ink,
-                letterSpacing: -0.1,
+                height: 56,
+                borderRadius: 14,
+                backgroundColor: elev,
+                borderWidth: 1,
+                borderColor: border,
+                alignItems: "center",
+                justifyContent: "center",
+                flexDirection: "row",
+                gap: 10,
               }}
             >
-              Use cloud agents
-            </Text>
-          </View>
-        </Pressable>
+              <CloudIcon size={20} color={ink} weight="regular" />
+              <Text
+                style={{
+                  fontFamily: "Inter-SemiBold",
+                  fontSize: 16,
+                  color: ink,
+                  letterSpacing: -0.1,
+                }}
+              >
+                Use cloud agents
+              </Text>
+            </View>
+          </Pressable>
+        ) : null}
 
         <Pressable
           onPress={handleSkip}

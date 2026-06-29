@@ -92,6 +92,7 @@ import { useAuthStore } from "@/store/authSlice";
 import { useDaemonStore } from "@/store/daemonSlice";
 import { useOnboardingStore } from "@/store/onboardingSlice";
 import { useCloudStore } from "@/store/cloudSlice";
+import { cloudEnabled } from "@/config/env";
 import { setNotificationResponseHandler, consumePendingDeepLink } from "@/lib/notifications";
 import { catchUpRunsForNote } from "@/lib/dispatch/catchUp";
 import {
@@ -197,7 +198,10 @@ export default function HomeScreen() {
   const [cloudGitHubOpen, setCloudGitHubOpen] = useState(false);
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
   const [paywall, setPaywall] = useState<PaywallReason | null>(null);
-  const dispatchMode = useCloudStore((s) => s.dispatchMode);
+  const rawDispatchMode = useCloudStore((s) => s.dispatchMode);
+  // Cloud is feature-gated off → the composer behaves as Mac-only regardless
+  // of any stored (or stale) cloud preference.
+  const dispatchMode = cloudEnabled ? rawDispatchMode : "mac";
   const autoWendOnSettle = useUiStore((s) => s.autoWendOnSettle);
   useSubscriptionSync();
 
