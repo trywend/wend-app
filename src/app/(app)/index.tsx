@@ -1151,7 +1151,7 @@ export default function HomeScreen() {
                     ? (sel) => setFollowUpSelection(sel)
                     : undefined
                 }
-                placeholder="Ask a follow-up..."
+                placeholder="Type a follow-up…"
                 placeholderColor={placeholderColor}
                 inkColor={inkColor}
                 caretColor={tokens["accent-caret"]}
