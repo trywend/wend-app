@@ -29,6 +29,11 @@ interface UiState {
    * Off downgrades the arm bar to a one-tap "Wend it" pill (no countdown). */
   autoWendOnSettle: boolean;
   setAutoWendOnSettle: (v: boolean) => void;
+  /** Set once the user's first-ever dispatch fires. The very first run is an
+   * explicit "Wend it" tap (never auto-countdown) so the user consciously sees
+   * the target + approval before anything runs. */
+  hasWended: boolean;
+  markWended: () => void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -47,6 +52,8 @@ export const useUiStore = create<UiState>()(
       setLinearConnected: (linearConnected) => set({ linearConnected }),
       autoWendOnSettle: true,
       setAutoWendOnSettle: (autoWendOnSettle) => set({ autoWendOnSettle }),
+      hasWended: false,
+      markWended: () => set({ hasWended: true }),
     }),
     {
       // Bumped key — old "wend.ui" persisted "system" on first launch and would

@@ -203,6 +203,11 @@ export default function HomeScreen() {
   // of any stored (or stale) cloud preference.
   const dispatchMode = cloudEnabled ? rawDispatchMode : "mac";
   const autoWendOnSettle = useUiStore((s) => s.autoWendOnSettle);
+  const hasWended = useUiStore((s) => s.hasWended);
+  const markWended = useUiStore((s) => s.markWended);
+  // The first-ever dispatch is always an explicit "Wend it" tap — never an
+  // auto-countdown — so the user sees the target + approval before run #1.
+  const autoWendEffective = autoWendOnSettle && hasWended;
   useSubscriptionSync();
 
   /* ─── Reduce-motion: read once + subscribe ───────────────────────── */
@@ -381,7 +386,7 @@ export default function HomeScreen() {
   const dispatchSignal = extractDispatchSignal(title, body);
   const arming = useArming({
     text: nextPromptSource,
-    autoWend: autoWendOnSettle,
+    autoWend: autoWendEffective,
     enabled: !isStreaming,
     fire: () => void handleSend(),
   });
@@ -612,6 +617,9 @@ export default function HomeScreen() {
       : isFirstSend
         ? null
         : runs[lastRunIdx]!.sessionId;
+
+    // First real dispatch fired — subsequent ones may auto-countdown.
+    if (!hasWended) markWended();
 
     setInflight({
       prompt,
@@ -1255,7 +1263,7 @@ export default function HomeScreen() {
             posture="read-only"
             ticket={armTicket}
             secondsLeft={arming.secondsLeft}
-            autoCountdown={autoWendOnSettle}
+            autoCountdown={autoWendEffective}
             reduceMotion={reduceMotion}
             bottomOffset={TOOLBAR_HEIGHT + 12}
             onCancel={arming.cancel}
