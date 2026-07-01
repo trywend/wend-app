@@ -124,6 +124,7 @@ import {
 import { LiveMarkdownInput } from "@/components/editor/LiveMarkdownInput";
 import { ArmBar } from "@/components/editor/ArmBar";
 import { useArming } from "@/lib/dispatch/useArming";
+import { useRoutePreview, ROUTE_CONFIDENCE_MIN } from "@/lib/dispatch/useRoutePreview";
 import { useUiStore } from "@/store/uiSlice";
 import type {
   EditorCommand,
@@ -384,9 +385,21 @@ export default function HomeScreen() {
   // and incomplete text never arm; an armed bar counts down (auto) or waits
   // for a tap (opt-down). force-send via the toolbar bypasses this entirely.
   const dispatchSignal = extractDispatchSignal(title, body);
+  // Routing preview for UNPINNED Mac notes: if the daemon isn't confident where
+  // this would run (or falls back to home), don't auto-fire — show the target
+  // and require an explicit tap so the note never silently runs in the wrong repo.
+  const routePreview = useRoutePreview(
+    nextPromptSource,
+    dispatchMode === "mac" && !noteCwd && !isStreaming,
+  );
+  const routeLowConfidence =
+    !noteCwd &&
+    routePreview != null &&
+    (routePreview.source === "fallback" ||
+      routePreview.confidence < ROUTE_CONFIDENCE_MIN);
   const arming = useArming({
     text: nextPromptSource,
-    autoWend: autoWendEffective,
+    autoWend: autoWendEffective && !routeLowConfidence,
     enabled: !isStreaming,
     fire: () => void handleSend(),
   });
@@ -1259,11 +1272,11 @@ export default function HomeScreen() {
             autofocused input for touches. */}
         {showArmBar ? (
           <ArmBar
-            repoName={projectBasename(noteCwd)}
+            repoName={noteCwd ? projectBasename(noteCwd) : routePreview?.name ?? null}
             posture="read-only"
             ticket={armTicket}
             secondsLeft={arming.secondsLeft}
-            autoCountdown={autoWendEffective}
+            autoCountdown={autoWendEffective && !routeLowConfidence}
             reduceMotion={reduceMotion}
             bottomOffset={TOOLBAR_HEIGHT + 12}
             onCancel={arming.cancel}
