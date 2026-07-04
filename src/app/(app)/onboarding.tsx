@@ -214,7 +214,8 @@ export default function OnboardingScreen() {
             }}
           >
             Write a note here. Your Mac picks it up and runs it with Claude in
-            your real repo — read-only by default, Face ID gates writes.
+            your real repo — under the permissions Claude already has on your
+            machine.
           </Text>
         </Animated.View>
 
