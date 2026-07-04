@@ -36,7 +36,7 @@ import {
  *  Override via EXPO_PUBLIC_RENDEZVOUS_BASE for local dev. */
 const RENDEZVOUS_BASE =
   process.env.EXPO_PUBLIC_RENDEZVOUS_BASE ||
-  "https://wend-landing.vercel.app";
+  "https://trywend.vercel.app";
 const RESOLVE_TIMEOUT_MS = 4_000;
 /** A resolved URL is considered fresh for this long before we'd re-fetch
  *  on the next dispatch. Cheap fetch — the cache is just to avoid one
@@ -80,18 +80,15 @@ export function useResolvedDaemonURL(): ResolvedDaemon {
         signal: controller.signal,
       });
       clearTimeout(timer);
-      // 404 from a properly-authed GET means the device row no longer
-      // exists. This happens when the user clicked "Reset device" on the
-      // Mac (which deletes the row + revokes the token), or when an
-      // admin removed it from the backend. We MUST NOT silently fall back
-      // to the cached URL hint — the Mac at the hint URL is either gone
-      // or a different paired Mac. Wipe the local pairing so the user
-      // gets bounced back to onboarding instead of dispatching into the
-      // void.
-      if (res.status === 404) {
-        useDaemonStore.getState().clear();
-        return null;
-      }
+      // A 404 here is ambiguous, so this is NON-destructive. It can mean a
+      // genuine device reset, but it also fires on backend churn: a cross-
+      // origin redirect (e.g. wend-landing → trywend) drops the Authorization
+      // header, so an authed GET arrives tokenless and the backend answers
+      // 404. Auto-wiping the pairing on that turned a redirect into an
+      // infinite bounce back to onboarding. Never clear from here — keep the
+      // pairing and fall back to the cached/direct URL. A truly-reset device
+      // surfaces as a dispatch failure the user can act on, not a silent
+      // logout.
       if (!res.ok) return null;
       const body = (await res.json()) as { currentUrl?: string | null };
       const fresh = body?.currentUrl ?? null;

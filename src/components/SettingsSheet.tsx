@@ -67,7 +67,7 @@ import { useSheetDrag } from "@/lib/useSheetDrag";
  *  touch-scope. Override via EXPO_PUBLIC_RENDEZVOUS_BASE for local dev. */
 const SETTINGS_RENDEZVOUS_BASE =
   process.env.EXPO_PUBLIC_RENDEZVOUS_BASE ||
-  "https://wend-landing.vercel.app";
+  "https://trywend.vercel.app";
 
 export interface SettingsSheetProps {
   open: boolean;

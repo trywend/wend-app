@@ -49,7 +49,7 @@ import { getInstallId } from "@/lib/installId";
  *  we use elsewhere in dispatch so an override applies uniformly. */
 const BACKEND_BASE =
   process.env.EXPO_PUBLIC_RENDEZVOUS_BASE ||
-  "https://wend-landing.vercel.app";
+  "https://trywend.vercel.app";
 
 /** EAS projectId is required by expo-notifications' `getExpoPushTokenAsync`
  *  for SDK 56's experience-host model. Resolved from app.json's `extra.eas.projectId`.

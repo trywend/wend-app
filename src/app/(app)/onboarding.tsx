@@ -32,7 +32,7 @@ import {
 
 /** Where the Mac app lives. The /download page handles the unsigned-app
  *  first-launch instructions and serves the EdDSA-signed DMG. */
-const MAC_DOWNLOAD_URL = "https://wend-landing.vercel.app/download";
+const MAC_DOWNLOAD_URL = "https://trywend.vercel.app/download";
 
 import { Text } from "@/components/primitives";
 import { WendMark } from "@/components/primitives/Logo";

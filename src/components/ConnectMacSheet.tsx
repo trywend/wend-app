@@ -102,7 +102,7 @@ import {
  *  shared constants module just for one string. */
 const RENDEZVOUS_BASE =
   process.env.EXPO_PUBLIC_RENDEZVOUS_BASE ||
-  "https://wend-landing.vercel.app";
+  "https://trywend.vercel.app";
 
 /** POST /api/devices/:id/adopt — binds the device to the signed-in
  *  user. Returns null on success, or a user-facing error string. The
@@ -240,7 +240,7 @@ type Mode =
 
 /** Where the Mac app lives. The /download page serves the signed DMG and the
  *  unsigned-app first-launch instructions. */
-const MAC_DOWNLOAD_URL = "https://wend-landing.vercel.app/download";
+const MAC_DOWNLOAD_URL = "https://trywend.vercel.app/download";
 
 export function ConnectMacSheet(
   props: ConnectMacSheetProps,
