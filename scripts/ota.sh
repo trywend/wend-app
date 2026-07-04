@@ -18,6 +18,16 @@ BRANCH="${2:-preview}"
 
 cd "$(dirname "$0")/.."
 
+# Load local, git-ignored secrets (WEND_BROADCAST_SECRET, optional
+# EXPO_PUBLIC_RENDEZVOUS_BASE override) so the push step can authenticate
+# without exporting them by hand every run. .env.local is never committed.
+if [[ -f .env.local ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env.local
+  set +a
+fi
+
 # CRITICAL: `eas update --environment <env>` resolves env vars from the EAS
 # environment STORE, which is empty for us — the EXPO_PUBLIC_* values live in
 # eas.json's build profiles. Exporting an empty Clerk key drops <ClerkProvider>
@@ -51,7 +61,7 @@ if [[ -z "${WEND_BROADCAST_SECRET:-}" ]]; then
   exit 0
 fi
 
-BASE="${EXPO_PUBLIC_RENDEZVOUS_BASE:-https://wend-landing.vercel.app}"
+BASE="${EXPO_PUBLIC_RENDEZVOUS_BASE:-https://trywend.vercel.app}"
 echo "→ Broadcasting update push…"
 PAYLOAD=$(MSG="$MSG" python3 - <<'PY'
 import json, os
