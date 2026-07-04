@@ -25,10 +25,15 @@ export default function AppLayout() {
 
   const authStatus = useAuthStore((s) => s.status);
   const deviceId = useDaemonStore((s) => s.deviceId);
+  const url = useDaemonStore((s) => s.url);
   const token = useDaemonStore((s) => s.token);
   const pairSkipped = useOnboardingStore((s) => s.pairSkipped);
 
-  const paired = Boolean(deviceId && token);
+  // A pairing is usable with a token plus *either* a rendezvous deviceId
+  // (v2) OR a direct URL (v1). Requiring deviceId locked out every v1
+  // pairing — which is all you get while the rendezvous backend is off —
+  // and bounced freshly-paired users straight back to onboarding.
+  const paired = Boolean(token && (deviceId || url));
   // expo-router types `useSegments()` as a string tuple, so a numeric index
   // beyond the known length tripped TS2493. Cast to a loose string[] read —
   // semantically equivalent and matches what the runtime hands us. Pre-

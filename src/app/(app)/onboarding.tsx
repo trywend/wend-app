@@ -53,6 +53,7 @@ export default function OnboardingScreen() {
   const [githubSheetOpen, setGithubSheetOpen] = useState(false);
 
   const deviceId = useDaemonStore((s) => s.deviceId);
+  const url = useDaemonStore((s) => s.url);
   const token = useDaemonStore((s) => s.token);
   const host = useDaemonStore((s) => s.host);
   const skipPairing = useOnboardingStore((s) => s.skipPairing);
@@ -63,7 +64,8 @@ export default function OnboardingScreen() {
   const githubConnected = useCloudStore((s) => s.githubConnected);
   const cloudReady = anthropicConnected && githubConnected;
 
-  const paired = Boolean(deviceId && token);
+  // v2 (rendezvous deviceId) or v1 (direct URL) both count as paired.
+  const paired = Boolean(token && (deviceId || url));
 
   useEffect(() => {
     markFirstShown();
