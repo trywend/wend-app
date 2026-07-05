@@ -95,7 +95,10 @@ import { useCloudStore } from "@/store/cloudSlice";
 import { cloudEnabled } from "@/config/env";
 import { setNotificationResponseHandler, consumePendingDeepLink } from "@/lib/notifications";
 import { catchUpRunsForNote } from "@/lib/dispatch/catchUp";
-import { catchUpMacRunsForNote } from "@/lib/dispatch/catchUpMac";
+import {
+  catchUpMacRunsForNote,
+  hydrateNotesFromMac,
+} from "@/lib/dispatch/catchUpMac";
 import {
   findEditNewStringForPath,
   findWriteContentForPath,
@@ -335,6 +338,23 @@ export default function HomeScreen() {
     resolvedDaemon.url,
     resolvedDaemon.token,
     refreshNotes,
+  ]);
+
+  // Hydrate the inbox on open: pull any completed Mac runs into the list so
+  // fire-and-forget results show without opening each note first.
+  useEffect(() => {
+    if (!inboxOpen || !resolvedDaemon.isReady || !userId) return;
+    void hydrateNotesFromMac({
+      userId,
+      url: resolvedDaemon.url,
+      token: resolvedDaemon.token,
+    });
+  }, [
+    inboxOpen,
+    resolvedDaemon.isReady,
+    resolvedDaemon.url,
+    resolvedDaemon.token,
+    userId,
   ]);
 
   const bodyRef = useRef<LiveMarkdownInputRef>(null);

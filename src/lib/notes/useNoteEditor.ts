@@ -27,6 +27,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuthStore } from "@/store/authSlice";
+import { useNotesCache } from "@/store/notesCacheSlice";
 import {
   getNote,
   loadOrCreateDraftNote,
@@ -169,6 +170,35 @@ export function useNoteEditor(noteId?: string): UseNoteEditorResult {
       cancelled = true;
     };
   }, [userId, noteId]);
+
+  // A background hydration (Mac/cloud catch-up) can merge runs into storage
+  // for the note that's already open. The load effect above only reads on
+  // mount, so without this the editor keeps its stale in-memory runs (and a
+  // later flush would clobber the merged ones back out). On a cache bump,
+  // re-read and APPEND any runs we don't have yet — never remove, never
+  // touch title/body — so hydrated results appear without losing edits.
+  const notesVersion = useNotesCache((s) => s.version);
+  useEffect(() => {
+    if (!loadedRef.current) return;
+    const id = idRef.current;
+    if (!id) return;
+    let cancelled = false;
+    void (async () => {
+      const result = await getNote(id);
+      if (cancelled || !result) return;
+      const known = new Set(runsRef.current.map((r) => r.id));
+      const added = result.runs.filter((r) => !known.has(r.id));
+      if (added.length === 0) return;
+      const merged = [...runsRef.current, ...added].sort(
+        (a, b) => a.createdAt - b.createdAt,
+      );
+      runsRef.current = merged;
+      setRunsState(merged);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [notesVersion]);
 
   /* ------------------------------------------------------------------- */
   /* Debounced flush                                                      */

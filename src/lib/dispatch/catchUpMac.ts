@@ -9,7 +9,13 @@
  * Mirror of catchUp.ts (which does the same against the cloud/Tempus).
  * Safe to call on every mount; no-ops when the daemon URL isn't ready.
  */
-import { getNote, saveNote, type PersistedRun } from "@/lib/notes-storage";
+import {
+  getNote,
+  listNotes,
+  saveNote,
+  type PersistedRun,
+} from "@/lib/notes-storage";
+import { bumpNotesVersion } from "@/store/notesCacheSlice";
 
 interface MacRun {
   id: string;
@@ -72,5 +78,34 @@ export async function catchUpMacRunsForNote(args: {
     (a, b) => a.createdAt - b.createdAt,
   );
   await saveNote({ id: noteId, runs: merged });
+  // Bump the shared cache so an OPEN editor (which loads runs into its own
+  // state on mount and won't otherwise re-read) merges the fresh runs in,
+  // and the inbox reflects the new status.
+  bumpNotesVersion();
   return newRuns.length;
+}
+
+/**
+ * Hydrate the inbox: pull completed Mac runs for the user's recent notes
+ * so a fire-and-forget result shows in the list before the note is even
+ * opened. Bounded fan-out; safe to call whenever the inbox opens.
+ */
+export async function hydrateNotesFromMac(args: {
+  userId: string;
+  url: string;
+  token: string;
+}): Promise<number> {
+  const { userId, url, token } = args;
+  if (!userId || !url || !token) return 0;
+  let records;
+  try {
+    records = await listNotes(userId);
+  } catch {
+    return 0;
+  }
+  const recent = records.slice(0, 20);
+  const results = await Promise.all(
+    recent.map((n) => catchUpMacRunsForNote({ noteId: n.id, url, token })),
+  );
+  return results.reduce((a, b) => a + b, 0);
 }
