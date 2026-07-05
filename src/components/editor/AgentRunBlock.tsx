@@ -66,8 +66,16 @@ export interface AgentRunBlockState {
   status: "running" | "done" | "error";
   /** What was sent to Claude — used to extract a ticket chip. */
   prompt: string;
-  /** Accumulated streamed text (markdown). */
+  /** Accumulated streamed text (markdown) — interim reasoning + final answer
+   *  in order. Used for expansion and file/link extraction. */
   response: string;
+  /** Interim "thinking" text between tool calls. Hidden by default, revealed
+   *  on tap. Absent on old rows → treated as empty. */
+  reasoning?: string;
+  /** Final deliverable text — the trailing segment after the last tool call.
+   *  This is what the note produced. Absent on old rows / catch-up → falls
+   *  back to `response`. */
+  answer?: string;
   /** Name-only chip strip — preserved for back-compat. */
   toolUses: string[];
   /** Richer per-call records when available. */
@@ -112,13 +120,28 @@ export function AgentRunBlock({
   const done = state.status === "done";
 
   const ticket = useMemo(() => extractTicket(state.prompt), [state.prompt]);
-  const blocks = useMemo(
+
+  // The final deliverable text is what the note produced — shown as the run's
+  // output. `reasoning` is the interim thinking, hidden by default. Old rows
+  // and cross-device catch-up carry only `response`; fall back to it as the
+  // answer so nothing is lost.
+  const answerText = state.answer ?? state.response;
+  const reasoningText = state.reasoning ?? "";
+  const hasReasoning = reasoningText.trim().length > 0;
+
+  // Full-response blocks feed file/link extraction (a path may be mentioned in
+  // reasoning). Answer blocks render the deliverable body.
+  const fullBlocks = useMemo(
     () => parseMarkdown(state.response),
     [state.response],
   );
+  const answerBlocks = useMemo(
+    () => parseMarkdown(answerText),
+    [answerText],
+  );
   const summary = useMemo(
-    () => summarizeMarkdown(state.response, 90),
-    [state.response],
+    () => summarizeMarkdown(answerText, 90),
+    [answerText],
   );
 
   // Body fold state. Done starts COLLAPSED — long conversations stay
@@ -126,6 +149,9 @@ export function AgentRunBlock({
   const [bodyOpen, setBodyOpen] = useState(false);
   // Tool drawer fold state. Closed by default to keep the body the focus.
   const [toolsOpen, setToolsOpen] = useState(false);
+  // Thinking drawer fold state. Closed by default — the larp stays minimized
+  // unless the user asks for it.
+  const [thinkingOpen, setThinkingOpen] = useState(false);
   // Warnings fold state — the "N warnings" one-liner expands on tap.
   const [warningsOpen, setWarningsOpen] = useState(false);
   const warnings = state.warnings ?? [];
@@ -206,6 +232,29 @@ export function AgentRunBlock({
     ? state.toolCalls
     : state.toolUses.map((name) => ({ name }));
   const hasTools = calls.length > 0;
+
+  // Deliverables — files touched + links produced. Rendered in every state
+  // (collapsed, expanded, running) so the note's output is always the focus.
+  const deliverables = (
+    <>
+      <FileChangesSummary
+        blocks={fullBlocks}
+        toolCalls={calls}
+        onOpenFile={onOpenFile}
+      />
+      <RunLinksSummary blocks={fullBlocks} toolCalls={calls} links={state.links} />
+    </>
+  );
+
+  // Running with no deliverable text yet: show one terse activity line derived
+  // from the latest tool, not the streaming reasoning prose.
+  const activity = running ? activityLabel(calls) : null;
+  // Stream text as the answer only before any tool fires (a tool-free Q&A).
+  // Once tools are in play the run is "reason → act → deliver"; we hold the
+  // deliverable until completion and show just the activity line meanwhile,
+  // so the reasoning chatter never lands on screen.
+  const answerStreaming =
+    running && !hasTools && answerText.trim().length > 0;
 
   return (
     <View
@@ -343,85 +392,119 @@ export function AgentRunBlock({
         </View>
       </Pressable>
 
-      {/* ─── Collapsed summary line (done && !bodyOpen) ───────────────── */}
-      {done && !bodyOpen && (summary.length > 0 || hasTools) ? (
+      {/* ─── Collapsed card (done && !bodyOpen) — deliverable first ────────
+          Leads with what the note produced (files / links), then a short
+          summary of the FINAL answer (not the run's opening reasoning), then
+          a muted tool count. The full AI output lives behind expansion. */}
+      {done && !bodyOpen ? (
         <Animated.View entering={FadeIn.duration(160)}>
-          <View
-            style={{
-              paddingHorizontal: 14,
-              paddingVertical: 12,
-            }}
-          >
-            {summary.length > 0 ? (
+          {deliverables}
+          {summary.length > 0 || hasTools ? (
+            <View
+              style={{
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+              }}
+            >
+              {summary.length > 0 ? (
+                <Text
+                  numberOfLines={2}
+                  style={{
+                    fontFamily: "Inter-Regular",
+                    fontSize: 13.5,
+                    lineHeight: 20,
+                    color: subtle,
+                    letterSpacing: -0.1,
+                  }}
+                >
+                  {summary}
+                </Text>
+              ) : null}
+              {hasTools ? (
+                <Text
+                  style={{
+                    marginTop: summary.length > 0 ? 6 : 0,
+                    fontFamily: "Inter-Medium",
+                    fontSize: 11.5,
+                    color: tertiary,
+                    letterSpacing: -0.1,
+                  }}
+                >
+                  {`+${calls.length} ${calls.length === 1 ? "tool" : "tools"}`}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+        </Animated.View>
+      ) : null}
+
+      {/* ─── Body — deliverable-first: files/links, the final answer, then
+          the thinking + raw tools tucked behind disclosures ────────────── */}
+      {showBody ? (
+        <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(120)}>
+          {/* What the note produced — always first. */}
+          {deliverables}
+
+          {/* Running, no deliverable text yet — one terse activity line
+              instead of streaming the reasoning. The larp stays off-screen;
+              tap "Thinking" to see it. */}
+          {running && !answerStreaming && !errored ? (
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+                paddingHorizontal: 14,
+                paddingTop: 12,
+                paddingBottom: 12,
+              }}
+            >
               <Text
-                numberOfLines={2}
                 style={{
-                  fontFamily: "Inter-Regular",
-                  fontSize: 13.5,
-                  lineHeight: 20,
+                  fontFamily: "Inter-Medium",
+                  fontSize: 13,
                   color: subtle,
                   letterSpacing: -0.1,
                 }}
               >
-                {summary}
+                {activity}
               </Text>
-            ) : null}
-            {hasTools ? (
-              <Text
-                style={{
-                  marginTop: summary.length > 0 ? 6 : 0,
-                  fontFamily: "Inter-Medium",
-                  fontSize: 11.5,
-                  color: tertiary,
-                  letterSpacing: -0.1,
-                }}
-              >
-                {`+${calls.length} ${calls.length === 1 ? "tool" : "tools"}`}
-              </Text>
-            ) : null}
-          </View>
-        </Animated.View>
-      ) : null}
-
-      {/* ─── Body — markdown + tool drawer + meta ─────────────────────── */}
-      {showBody ? (
-        <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(120)}>
-          {/* Tool drawer */}
-          {hasTools ? (
-            <ToolDrawer
-              calls={calls}
-              open={toolsOpen}
-              onToggle={() => setToolsOpen((v) => !v)}
-              ink={ink}
-              tertiary={tertiary}
-              border={border}
-              accent={accent}
-            />
+              {hasTools ? (
+                <Text
+                  style={{
+                    fontFamily: "Inter-Medium",
+                    fontSize: 11.5,
+                    color: tertiary,
+                    letterSpacing: -0.1,
+                  }}
+                >
+                  {`· ${calls.length} ${calls.length === 1 ? "tool" : "tools"}`}
+                </Text>
+              ) : null}
+            </View>
           ) : null}
 
-          {/* File changes summary — surfaces edits ahead of the prose so
-              the user doesn't have to expand the tool drawer to know
-              what touched. Renders nothing if there are no paths. */}
-          <FileChangesSummary
-            blocks={blocks}
-            toolCalls={calls}
-            onOpenFile={onOpenFile}
-          />
-
-          {/* Deliverables — PRs, branches, dashboards the run produced. */}
-          <RunLinksSummary blocks={blocks} toolCalls={calls} links={state.links} />
-
-          {/* Response body */}
-          {state.response.length > 0 || running ? (
+          {/* Final deliverable text — the answer. While running with tools we
+              withhold it (answerStreaming is false) so mid-run reasoning text
+              never renders here; it lands only once the run is done. On error,
+              show whatever came back. */}
+          {(errored
+            ? state.response.length > 0
+            : done
+              ? answerText.length > 0
+              : answerStreaming) ? (
             <View
               style={{
                 paddingHorizontal: 14,
-                paddingTop: hasTools ? 4 : 14,
+                paddingTop: 14,
                 paddingBottom: errored || (done && state.costUsd === 0 && state.durationMs === 0) ? 14 : 6,
               }}
             >
-              <Markdown blocks={blocks} onOpenFile={onOpenFile} />
-              {running ? (
+              <Markdown
+                blocks={errored ? fullBlocks : answerBlocks}
+                onOpenFile={onOpenFile}
+              />
+              {answerStreaming ? (
                 <RNAnimated.Text
                   style={{
                     marginTop: 2,
@@ -435,6 +518,29 @@ export function AgentRunBlock({
                 </RNAnimated.Text>
               ) : null}
             </View>
+          ) : null}
+
+          {/* Thinking — interim reasoning, collapsed by default. */}
+          {hasReasoning ? (
+            <ThinkingDrawer
+              text={reasoningText}
+              open={thinkingOpen}
+              onToggle={() => setThinkingOpen((v) => !v)}
+              tertiary={tertiary}
+            />
+          ) : null}
+
+          {/* Raw tool calls. */}
+          {hasTools ? (
+            <ToolDrawer
+              calls={calls}
+              open={toolsOpen}
+              onToggle={() => setToolsOpen((v) => !v)}
+              ink={ink}
+              tertiary={tertiary}
+              border={border}
+              accent={accent}
+            />
           ) : null}
 
           {/* Error caption + Retry */}
@@ -645,7 +751,91 @@ function ToolDrawer({
   );
 }
 
+/* ─── Thinking drawer ───────────────────────────────────────────────────────
+   Holds the interim reasoning — the "let me get context…" chatter Claude
+   streams between tool calls. Collapsed by default; the note's output is the
+   final answer above, not this. Rendered as dim prose, never the focus. */
+
+function ThinkingDrawer({
+  text,
+  open,
+  onToggle,
+  tertiary,
+}: {
+  text: string;
+  open: boolean;
+  onToggle: () => void;
+  tertiary: string;
+}) {
+  const blocks = useMemo(() => parseMarkdown(text), [text]);
+  return (
+    <View>
+      <Pressable
+        onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityLabel={open ? "Hide thinking" : "Show thinking"}
+        style={{
+          paddingHorizontal: 14,
+          paddingTop: 12,
+          paddingBottom: 8,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
+        }}
+      >
+        <Text
+          style={{
+            fontFamily: "Inter-Medium",
+            fontSize: 10.5,
+            color: tertiary,
+            letterSpacing: 1.2,
+            textTransform: "uppercase",
+          }}
+        >
+          Thinking
+        </Text>
+        <View style={{ flex: 1 }} />
+        {open ? (
+          <CaretDownIcon size={11} color={tertiary} weight="bold" />
+        ) : (
+          <CaretRightIcon size={11} color={tertiary} weight="bold" />
+        )}
+      </Pressable>
+
+      {open ? (
+        <Animated.View
+          entering={FadeIn.duration(160)}
+          style={{
+            paddingHorizontal: 14,
+            paddingBottom: 10,
+            opacity: 0.75,
+          }}
+        >
+          <Markdown blocks={blocks} />
+        </Animated.View>
+      ) : null}
+    </View>
+  );
+}
+
 /* ─── Helpers ─────────────────────────────────────────────────────────── */
+
+/**
+ * One terse present-tense line for the running state, derived from the most
+ * recent tool call. Deliberately generic — enough to say "it's doing
+ * something" without leaking the reasoning stream onto the phone.
+ */
+function activityLabel(calls: ToolCall[]): string {
+  const last = calls[calls.length - 1];
+  if (!last) return "Working…";
+  const name = last.name;
+  if (/^(Read|Grep|Glob|LS|NotebookRead)$/.test(name)) return "Reading…";
+  if (/^(Edit|MultiEdit|Write|Create|NotebookEdit)$/.test(name)) return "Writing…";
+  if (name === "Bash") return "Running a command…";
+  if (/^(WebFetch|WebSearch)$/.test(name)) return "Searching…";
+  if (name === "Task") return "Working…";
+  return "Working…";
+}
 
 function Dot({ color }: { color: string }) {
   return (

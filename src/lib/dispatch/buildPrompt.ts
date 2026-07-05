@@ -270,13 +270,21 @@ const FRAME_QUESTION =
   "You're receiving a short question from a phone. Answer concisely — one or two short paragraphs at most. Skip preamble. If the answer truly needs code or commands, keep them minimal. Don't fabricate context you don't have.";
 
 const FRAME_TASK =
-  "You're receiving a short work request from a phone. Do the work and report what changed in one tight summary at the end (files touched + one-line why). Skip preamble. Ask only if a decision is genuinely ambiguous — otherwise pick the reasonable default and proceed.";
+  "You're carrying out a note — treat it as a standing instruction that runs itself, not a chat you're replying to. Do the work and produce the deliverable. Pick the reasonable default and proceed; don't stop to ask unless a decision is truly blocking.";
 
 const FRAME_IDEA =
   "You're receiving a thinking-out-loud note from a phone. Engage as a thinking partner: react, sharpen the idea, surface tradeoffs. Do NOT start doing work, writing code, or editing files unless the user explicitly asks. Keep the reply conversational.";
 
 const CONCISENESS_DIRECTIVE =
   "Respond concisely. Prefer 2-4 sentences over a multi-section essay. Show your work only if the user asks.";
+
+// Appended for task/command runs. Forces the output to read as the note's
+// finished result — a single deliverable, no conversational scaffolding, no
+// menu of options pasted inline. The phone renders the trailing text as the
+// note's output, so a run that ends in "want me to also…?" reads as an AI
+// chatting back rather than a note that acted.
+const DELIVERABLE_DIRECTIVE =
+  "End with the deliverable itself and nothing after it. No follow-up questions, no 'want me to…', no offers to do more, no recap of your process. If the ask genuinely needs multiple variants or a long artifact, write them to a file in the project and end with just the path — do not paste the options into the reply. The last thing you output is the result the note produced.";
 
 function frameFor(intent: BuiltPrompt["intent"]): string {
   switch (intent) {
@@ -359,7 +367,7 @@ export function buildPrompt(
   // slash (a real CLI command) still falls through to verbatim below.
   const parsed = parseCommand(rawNote);
   if (parsed) {
-    const preamble = `${parsed.command.systemPrompt}\n\n${CONCISENESS_DIRECTIVE}`;
+    const preamble = `${parsed.command.systemPrompt}\n\n${CONCISENESS_DIRECTIVE}\n\n${DELIVERABLE_DIRECTIVE}`;
     const arg = parsed.argument;
     const prompt = arg ? `${preamble}\n\n---\n\n${arg}` : preamble;
     return { prompt, intent: "command", rawNote };
@@ -386,6 +394,10 @@ export function buildPrompt(
   const parts: string[] = [frame];
   if (context) parts.push(context);
   parts.push(CONCISENESS_DIRECTIVE);
+  // Task runs produce an artifact; force the deliverable-only ending so the
+  // note's output reads as a result, not a chat turn. Questions/ideas stay
+  // conversational.
+  if (intent === "task") parts.push(DELIVERABLE_DIRECTIVE);
   const preamble = parts.join("\n\n");
 
   const prompt = `${preamble}\n\n---\n\n${rawNote.trim()}`;

@@ -145,6 +145,10 @@ const TOOLBAR_HEIGHT = 52;
 interface InflightRun {
   prompt: string;
   response: string;
+  /** Interim reasoning between tool calls (the "thinking" the phone hides). */
+  reasoning: string;
+  /** Final deliverable text — trailing segment after the last tool call. */
+  answer: string;
   toolUses: string[];
   toolCalls: Array<{ name: string; input?: unknown }>;
   sessionId: string | null;
@@ -608,6 +612,8 @@ export default function HomeScreen() {
       setInflight({
         prompt: candidate,
         response: "",
+        reasoning: "",
+        answer: "",
         toolUses: [],
         toolCalls: [],
         sessionId: null,
@@ -672,6 +678,8 @@ export default function HomeScreen() {
     setInflight({
       prompt,
       response: "",
+      reasoning: "",
+      answer: "",
       toolUses: [],
       toolCalls: [],
       sessionId,
@@ -687,6 +695,12 @@ export default function HomeScreen() {
     });
 
     let accumulated = "";
+    // Split accumulator: `pending` is the current text segment; when a tool
+    // call arrives it gets flushed into `reasoningParts` (that segment was
+    // interim thinking). The final `pending` at the end is the deliverable.
+    let pending = "";
+    const reasoningParts: string[] = [];
+    const joinReasoning = () => reasoningParts.join("\n\n");
     const tools: string[] = [];
     const toolCalls: Array<{ name: string; input?: unknown }> = [];
     const warnings: string[] = [];
@@ -732,10 +746,16 @@ export default function HomeScreen() {
         }
         if (e.type === "text") {
           accumulated += e.text;
+          pending += e.text;
           setInflight((s) =>
-            s ? { ...s, response: accumulated } : s,
+            s ? { ...s, response: accumulated, answer: pending } : s,
           );
         } else if (e.type === "tool_use") {
+          // The text emitted before this tool call was interim thinking —
+          // flush it to reasoning and start a fresh segment. Whatever text
+          // comes after the last tool call is the final deliverable.
+          if (pending.trim().length > 0) reasoningParts.push(pending.trim());
+          pending = "";
           tools.push(e.name);
           toolCalls.push({ name: e.name, input: e.input });
           setInflight((s) =>
@@ -744,6 +764,8 @@ export default function HomeScreen() {
                   ...s,
                   toolUses: [...tools],
                   toolCalls: [...toolCalls],
+                  reasoning: joinReasoning(),
+                  answer: "",
                 }
               : s,
           );
@@ -809,6 +831,8 @@ export default function HomeScreen() {
             id: Crypto.randomUUID(),
             prompt,
             response: accumulated,
+            reasoning: joinReasoning(),
+            answer: pending.trim(),
             sessionId: resolvedSessionId,
             status: finalStatus,
             durationMs: resolvedDuration,
@@ -1988,6 +2012,8 @@ function persistedRunToBlockState(run: PersistedRun): AgentRunBlockState {
     status: run.status,
     prompt: run.prompt,
     response: run.response,
+    reasoning: run.reasoning,
+    answer: run.answer,
     toolUses: run.toolUses,
     toolCalls: run.toolCalls,
     links: run.links,
@@ -2003,6 +2029,8 @@ function inflightToBlockState(run: InflightRun): AgentRunBlockState {
     status: run.status,
     prompt: run.prompt,
     response: run.response,
+    reasoning: run.reasoning,
+    answer: run.answer,
     toolUses: run.toolUses,
     toolCalls: run.toolCalls,
     warnings: run.warnings,

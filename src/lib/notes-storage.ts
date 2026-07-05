@@ -92,8 +92,18 @@ export interface PersistedRun {
   id: string;
   /** What got sent to Claude — kept for display/debug. */
   prompt: string;
-  /** The assistant's full text response. */
+  /** The assistant's full text response (interim reasoning + final answer),
+   *  in stream order. Kept for expansion, file/link extraction, and back-compat
+   *  with rows persisted before the split landed. */
   response: string;
+  /** Interim "thinking" text — assistant prose emitted between tool calls,
+   *  joined in order. Hidden by default on the phone; revealed on tap. Absent
+   *  on rows persisted before the split (fall back to empty). */
+  reasoning?: string;
+  /** The final deliverable text — the trailing assistant segment after the
+   *  last tool call. This is what the note produced, shown as the run's output.
+   *  Absent on old rows / cross-device catch-up (fall back to `response`). */
+  answer?: string;
   /** Claude's session_id, for --resume on the next run. */
   sessionId: string | null;
   status: "done" | "error";
