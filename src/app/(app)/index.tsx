@@ -95,6 +95,7 @@ import { useCloudStore } from "@/store/cloudSlice";
 import { cloudEnabled } from "@/config/env";
 import { setNotificationResponseHandler, consumePendingDeepLink } from "@/lib/notifications";
 import { catchUpRunsForNote } from "@/lib/dispatch/catchUp";
+import { catchUpMacRunsForNote } from "@/lib/dispatch/catchUpMac";
 import {
   findEditNewStringForPath,
   findWriteContentForPath,
@@ -299,6 +300,39 @@ export default function HomeScreen() {
     useDispatch();
   const resolvedDaemon = useResolvedDaemonURL();
 
+  /* ─── Catch up Mac runs finished while the phone was disconnected ─── */
+  // Fire-and-forget dispatches complete on the Mac even if the app was
+  // backgrounded/killed mid-stream. On open, pull any runs the daemon
+  // recorded for this note so the result shows instead of an empty note
+  // that then re-fires. `hydratingRuns` suppresses auto-arm until this
+  // resolves so a not-yet-hydrated prompt can't be dispatched twice.
+  const [hydratingRuns, setHydratingRuns] = useState(false);
+  useEffect(() => {
+    if (!resolvedNoteId || !resolvedDaemon.isReady) return;
+    let alive = true;
+    setHydratingRuns(true);
+    void catchUpMacRunsForNote({
+      noteId: resolvedNoteId,
+      url: resolvedDaemon.url,
+      token: resolvedDaemon.token,
+    })
+      .then((added) => {
+        if (alive && added > 0) void refreshNotes();
+      })
+      .finally(() => {
+        if (alive) setHydratingRuns(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [
+    resolvedNoteId,
+    resolvedDaemon.isReady,
+    resolvedDaemon.url,
+    resolvedDaemon.token,
+    refreshNotes,
+  ]);
+
   const bodyRef = useRef<LiveMarkdownInputRef>(null);
   const followUpRefs = useRef<Record<number, TextInput | null>>({});
   const scrollRef = useRef<ScrollView>(null);
@@ -400,8 +434,9 @@ export default function HomeScreen() {
   const arming = useArming({
     text: nextPromptSource,
     autoWend: autoWendEffective && !routeLowConfidence,
-    enabled: !isStreaming,
+    enabled: !isStreaming && !hydratingRuns,
     fire: () => void handleSend(),
+    runs,
   });
   const showArmBar = arming.phase === "armed" && !isStreaming;
   const armTicket = isFirstSend
