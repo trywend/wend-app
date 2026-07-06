@@ -49,6 +49,10 @@ jobs:
         if: steps.guard.outputs.skip == 'false'
         run: npx tsc --noEmit
 
+      - name: Install eas-cli
+        if: steps.guard.outputs.skip == 'false'
+        run: npm i -g eas-cli
+
       - name: Publish OTA
         if: steps.guard.outputs.skip == 'false'
         run: |
