@@ -40,10 +40,19 @@ import json, os, shlex
 branch = os.environ["BRANCH"]
 with open("eas.json") as f:
     cfg = json.load(f)
-env = (cfg.get("build", {}).get(branch, {}) or {}).get("env", {}) or {}
+build = cfg.get("build", {})
+def resolve_env(name, seen=()):
+    prof = build.get(name) or {}
+    env = {}
+    parent = prof.get("extends")
+    if parent and parent not in seen:
+        env.update(resolve_env(parent, seen + (name,)))
+    env.update(prof.get("env") or {})
+    return env
+env = resolve_env(branch)
 pub = {k: v for k, v in env.items() if k.startswith("EXPO_PUBLIC_")}
 if not pub:
-    raise SystemExit(f"no EXPO_PUBLIC_* vars in eas.json build.{branch}.env")
+    raise SystemExit(f"no EXPO_PUBLIC_* vars in eas.json build.{branch} (incl. extends)")
 for k, v in pub.items():
     print(f"export {k}={shlex.quote(str(v))}")
 PY
@@ -54,6 +63,13 @@ echo "$ENV_EXPORTS" | sed 's/=.*/ ✓/'
 echo "→ Publishing OTA to branch '$BRANCH'…"
 npx eas update --branch "$BRANCH" --environment "$BRANCH" \
   --message "$MSG" --non-interactive
+
+# Only push-notify real user channels. The staging channel is for the dev's
+# own test device — don't buzz every alpha tester for a staging publish.
+if [[ "$BRANCH" == "staging" ]]; then
+  echo "→ staging channel — OTA published, skipping the tester push."
+  exit 0
+fi
 
 if [[ -z "${WEND_BROADCAST_SECRET:-}" ]]; then
   echo "⚠ WEND_BROADCAST_SECRET unset — skipping push. The in-app banner will"

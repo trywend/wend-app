@@ -51,6 +51,10 @@
         "simulator": true
       }
     },
+    "staging": {
+      "extends": "preview",
+      "channel": "staging"
+    },
     "production": {
       "channel": "production",
       "env": {

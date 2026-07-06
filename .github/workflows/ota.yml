@@ -1,0 +1,57 @@
+name: ota
+
+# Publish an OTA update after CI passes.
+#   push to staging -> eas channel "staging" (dev test device)
+#   push to main    -> eas channel "preview" (alpha testers) + push broadcast
+#
+# Auth: eas needs EXPO_TOKEN (a GitHub secret) since CI has no local login.
+# WEND_BROADCAST_SECRET (secret) enables the tester push on main. Both are
+# optional — without EXPO_TOKEN the job no-ops so the pipeline stays green
+# until the token is added.
+
+on:
+  push:
+    branches: [main, staging]
+
+concurrency:
+  group: ota-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      WEND_BROADCAST_SECRET: ${{ secrets.WEND_BROADCAST_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Skip if EXPO_TOKEN is not configured
+        id: guard
+        run: |
+          if [ -z "${EXPO_TOKEN}" ]; then
+            echo "EXPO_TOKEN not set — skipping OTA (add it in repo secrets to enable)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.guard.outputs.skip == 'false'
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+        if: steps.guard.outputs.skip == 'false'
+
+      - name: Type-check before publishing
+        if: steps.guard.outputs.skip == 'false'
+        run: npx tsc --noEmit
+
+      - name: Publish OTA
+        if: steps.guard.outputs.skip == 'false'
+        run: |
+          CHANNEL=$([ "${GITHUB_REF_NAME}" = "main" ] && echo preview || echo staging)
+          MSG=$(git log -1 --pretty=%s)
+          ./scripts/ota.sh "$MSG" "$CHANNEL"
