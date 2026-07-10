@@ -284,7 +284,7 @@ const CONCISENESS_DIRECTIVE =
 // note's output, so a run that ends in "want me to also…?" reads as an AI
 // chatting back rather than a note that acted.
 const DELIVERABLE_DIRECTIVE =
-  "End with the deliverable itself and nothing after it. No follow-up questions, no 'want me to…', no offers to do more, no recap of your process. If the ask genuinely needs multiple variants or a long artifact, write them to a file in the project and end with just the path — do not paste the options into the reply. The last thing you output is the result the note produced.";
+  "Output ONLY the deliverable — the finished result, nothing wrapped around it. Do NOT open with a preamble: no 'Here's…', no restating the task, no 'based on the product as built', no explaining what you did or made. Start on the first line of the actual result. And end with the deliverable too: no follow-up questions, no 'want me to…', no offers to do more, no recap of your process. If the ask genuinely needs multiple variants or a long artifact, write them to a file in the project and end with just the path — do not paste the options into the reply. The first and last thing you output are both the result the note produced.";
 
 function frameFor(intent: BuiltPrompt["intent"]): string {
   switch (intent) {
