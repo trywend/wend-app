@@ -25,6 +25,10 @@ export interface CloudState {
    *  toggleable in Settings. No auto-fallback. */
   dispatchMode: DispatchMode;
   anthropicConnected: boolean;
+  /** Last four characters of the registered Anthropic key, for a masked
+   *  hint in Settings. Never the full key — the phone forgets that on
+   *  upload. Null when no key is registered. */
+  anthropicKeyLast4: string | null;
   githubConnected: boolean;
   githubLogin: string | null;
   githubInstallationId: number | null;
@@ -33,7 +37,7 @@ export interface CloudState {
   lastSyncedAt: number | null;
 
   setDispatchMode(mode: DispatchMode): void;
-  setAnthropic(connected: boolean): void;
+  setAnthropic(connected: boolean, last4?: string | null): void;
   setGithub(args: {
     installed: boolean;
     login: string | null;
@@ -48,6 +52,7 @@ export const useCloudStore = create<CloudState>()(
     (set) => ({
       dispatchMode: "mac",
       anthropicConnected: false,
+      anthropicKeyLast4: null,
       githubConnected: false,
       githubLogin: null,
       githubInstallationId: null,
@@ -56,8 +61,16 @@ export const useCloudStore = create<CloudState>()(
       lastSyncedAt: null,
 
       setDispatchMode: (mode) => set({ dispatchMode: mode }),
-      setAnthropic: (connected) =>
-        set({ anthropicConnected: connected, lastSyncedAt: Date.now() }),
+      setAnthropic: (connected, last4) =>
+        set((s) => ({
+          anthropicConnected: connected,
+          anthropicKeyLast4: connected
+            ? last4 !== undefined
+              ? last4
+              : s.anthropicKeyLast4
+            : null,
+          lastSyncedAt: Date.now(),
+        })),
       setGithub: ({ installed, login, installationId }) =>
         set({
           githubConnected: installed,
@@ -71,6 +84,7 @@ export const useCloudStore = create<CloudState>()(
         set({
           dispatchMode: "mac",
           anthropicConnected: false,
+          anthropicKeyLast4: null,
           githubConnected: false,
           githubLogin: null,
           githubInstallationId: null,

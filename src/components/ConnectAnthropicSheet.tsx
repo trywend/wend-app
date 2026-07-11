@@ -7,7 +7,7 @@
  */
 import { useState } from "react";
 import { Alert, Pressable, TextInput, View } from "react-native";
-import { ArrowRightIcon, EyeIcon, EyeSlashIcon, TrashIcon } from "phosphor-react-native";
+import { ArrowRightIcon, CheckCircleIcon, EyeIcon, EyeSlashIcon, TrashIcon } from "phosphor-react-native";
 import Animated, { FadeIn } from "react-native-reanimated";
 
 import { Text } from "@/components/primitives";
@@ -27,6 +27,7 @@ export function ConnectAnthropicSheet({
   const api = useWendCloudApi();
   const setAnthropic = useCloudStore((s) => s.setAnthropic);
   const isConnected = useCloudStore((s) => s.anthropicConnected);
+  const keyLast4 = useCloudStore((s) => s.anthropicKeyLast4);
 
   const [key, setKey] = useState("");
   const [reveal, setReveal] = useState(false);
@@ -45,7 +46,7 @@ export function ConnectAnthropicSheet({
     setBusy(true);
     try {
       await api.connectAnthropic(trimmed);
-      setAnthropic(true);
+      setAnthropic(true, trimmed.slice(-4));
       setKey("");
       onClose();
     } catch (err) {
@@ -60,7 +61,7 @@ export function ConnectAnthropicSheet({
     setBusy(true);
     try {
       await api.disconnectAnthropic();
-      setAnthropic(false);
+      setAnthropic(false, null);
       onClose();
     } catch (err) {
       Alert.alert("Couldn't disconnect", String(err));
@@ -119,6 +120,44 @@ export function ConnectAnthropicSheet({
         your Anthropic account, not Wend's. Get one at console.anthropic.com →
         API Keys.
       </Text>
+
+      {isConnected ? (
+        <View
+          style={{
+            marginTop: 24,
+            borderWidth: 1,
+            borderColor: tokens["border-hairline"],
+            borderRadius: 14,
+            padding: 16,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <CheckCircleIcon size={24} color={tokens["status-done"]} weight="fill" />
+          <View style={{ flex: 1 }}>
+            <Text
+              style={{
+                fontFamily: "Inter-SemiBold",
+                fontSize: 16,
+                color: tokens["text-primary"],
+              }}
+            >
+              Key connected
+            </Text>
+            <Text
+              style={{
+                marginTop: 2,
+                fontFamily: "JetBrainsMono-Regular",
+                fontSize: 13,
+                color: tokens["text-secondary"],
+              }}
+            >
+              {keyLast4 ? `sk-ant-…${keyLast4}` : "sk-ant-…"}
+            </Text>
+          </View>
+        </View>
+      ) : null}
 
       <View
         style={{

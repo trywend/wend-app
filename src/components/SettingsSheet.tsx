@@ -5,26 +5,29 @@
  * inbox header. Sits ABOVE the InboxSheet (z=50) at z=60, so opening it dims
  * the inbox behind it. Sections (top-to-bottom):
  *
- *   1. Account    — Profile, Subscription (both stubs for now)
- *   2. Connectivity — GitHub (live if Clerk session was created via GitHub
- *      OAuth), Linear (always "Connect"). Highlighted with an ember accent
- *      bar on the left edge. Any row in this section opens IntegrationsSheet.
- *   3. Preferences — Theme (cycles light→dark→system), Notifications (visual
- *      toggle persisted in useUiStore.notificationsEnabled).
+ *   1. Profile     — avatar, name, email from the Clerk session.
+ *   2. Subscription — the real plan. During alpha (paywalls disabled) this
+ *      reads "Wend Pro · Alpha" with an honest note that billing isn't live.
+ *   3. Connectivity — Mac, GitHub (cloud-gated), Linear. Ember accent bar.
+ *   4. Cloud (gated) — dispatch mode, Anthropic key, repo access.
+ *   5. Preferences — theme cycle, Wend on settle, Notifications.
+ *   6. Account     — Log out, and a destructive Delete account action that
+ *      calls user.delete() behind a native confirm.
  *
- * Bottom: a red destructive "Log out" button that invokes the onSignOut prop.
- *
- * Same modal-stack pattern as InboxSheet — return null when closed; mount-
- * gated so the SlideInDown/SlideOutDown entrance fires on every open. No drag-
- * to-dismiss for these (header X covers it, tap-outside covers the rest).
- *
- * NativeWind 4 / Pressable gotcha — see InboxSheet's FAB. We use simple
- * `({pressed}) => ({opacity})` callbacks here without ever putting a
- * backgroundColor inside the function form. Static visuals (card bg, borders,
- * tints) live on parent Views.
+ * NativeWind 4 / Pressable gotcha — inside any Pressable whose `style` is a
+ * function callback, layout/sizing utilities silently drop from className.
+ * Every Pressable here keeps layout in inline `style` and the function form
+ * carries only `opacity`. Static visuals live on parent Views.
  */
 import { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Switch, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Pressable,
+  ScrollView,
+  Switch,
+  View,
+} from "react-native";
 import Animated, {
   FadeIn,
   FadeOut,
@@ -32,23 +35,23 @@ import Animated, {
   SlideOutDown,
 } from "react-native-reanimated";
 import { GestureDetector } from "react-native-gesture-handler";
+import { Image } from "expo-image";
 import {
   BellRingingIcon,
   CaretRightIcon,
   CrosshairIcon,
-  CreditCardIcon,
   GithubLogoIcon,
   KanbanIcon,
+  KeyIcon,
   LaptopIcon,
   MoonStarsIcon,
   SignOutIcon,
-  SparkleIcon,
   StarIcon,
-  UserIcon,
+  TrashIcon,
   XIcon,
   type Icon as PhosphorIcon,
 } from "phosphor-react-native";
-import { useAuth } from "@clerk/clerk-expo";
+import { useAuth, useUser } from "@clerk/clerk-expo";
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
 
@@ -80,8 +83,8 @@ export interface SettingsSheetProps {
   onConnectAnthropic?: () => void;
   /** Opens the cloud-agent GitHub App install sheet. */
   onConnectCloudGitHub?: () => void;
-  /** Optional handler for not-yet-built destinations (Profile, Subscription).
-   *  The parent renders a toast / no-op. */
+  /** Retained for compatibility with the parent's wiring. No longer used —
+   *  Profile and Subscription are real surfaces now. */
   onShowComingSoon?: (label: string) => void;
 }
 
@@ -99,14 +102,16 @@ function SettingsSheetMounted({
   onConnectMac,
   onConnectAnthropic,
   onConnectCloudGitHub,
-  onShowComingSoon,
 }: SettingsSheetProps) {
+  const { user } = useUser();
   const anthropicConnected = useCloudStore((s) => s.anthropicConnected);
+  const anthropicKeyLast4 = useCloudStore((s) => s.anthropicKeyLast4);
   const cloudGithubConnected = useCloudStore((s) => s.githubConnected);
   const subTier = useSubscriptionStore((s) => s.tier);
   const subStatus = useSubscriptionStore((s) => s.status);
   const subUsed = useSubscriptionStore((s) => s.cloudUsedThisMonth);
   const subQuota = useSubscriptionStore((s) => s.cloudQuotaTotal);
+  const subPeriodEnd = useSubscriptionStore((s) => s.currentPeriodEnd);
   const subPaywallsOff = useSubscriptionStore((s) => s.paywallsDisabled);
   const cloudGithubLogin = useCloudStore((s) => s.githubLogin);
   const dispatchMode = useCloudStore((s) => s.dispatchMode);
@@ -123,6 +128,8 @@ function SettingsSheetMounted({
   const setNotificationsEnabled = useUiStore((s) => s.setNotificationsEnabled);
   const autoWendOnSettle = useUiStore((s) => s.autoWendOnSettle);
   const setAutoWendOnSettle = useUiStore((s) => s.setAutoWendOnSettle);
+
+  const [deleting, setDeleting] = useState(false);
 
   // GitHub status now reflects the single Wend Cloud App install
   // (cloudGithubConnected/cloudGithubLogin above) — the same connection cloud
@@ -237,12 +244,15 @@ function SettingsSheetMounted({
 
   const canvasBg = tokens["surface-canvas"];
   const cardBg = tokens["surface-elevated"];
+  const chipBg = tokens["surface-chip"];
   const inkColor = tokens["text-primary"];
   const subtleColor = tokens["text-secondary"];
   const tertiaryColor = tokens["text-tertiary"];
   const borderColor = tokens["border-hairline"];
   const accent = tokens["accent-default"];
   const accentOn = tokens["accent-on"];
+  const doneColor = tokens["status-done"];
+  const warnColor = tokens["status-warn"];
   const failedColor = tokens["status-failed"];
 
   function cycleTheme() {
@@ -260,6 +270,76 @@ function SettingsSheetMounted({
       : preference === "dark"
         ? "Dark"
         : "System default";
+
+  // -----------------------------------------------------------------
+  // Delete account — the privacy policy promises real deletion, so this
+  // calls Clerk's user.delete() behind an irreversible-warning confirm,
+  // then hands off to the parent's sign-out to wipe local state + route.
+  // -----------------------------------------------------------------
+  const deleteAccount = useCallback(async () => {
+    if (!user || deleting) return;
+    setDeleting(true);
+    try {
+      await user.delete();
+      onSignOut();
+    } catch {
+      setDeleting(false);
+      Alert.alert(
+        "Couldn't delete account",
+        "Something went wrong. Try again, or reach us at agnij@trywend.app.",
+      );
+    }
+  }, [user, deleting, onSignOut]);
+
+  const confirmDeleteAccount = useCallback(() => {
+    Alert.alert(
+      "Delete account",
+      "This permanently erases your Wend account and everything tied to it. It can't be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => void deleteAccount(),
+        },
+      ],
+    );
+  }, [deleteAccount]);
+
+  // Subscription display — honest for alpha, correct for the billed future.
+  const alpha = subPaywallsOff;
+  const planName = alpha
+    ? "Wend Pro"
+    : subTier === "pro"
+      ? "Wend Pro"
+      : subTier === "cloud_paygo"
+        ? "Wend Cloud"
+        : "Free";
+  const planBadge: { label: string; color: string } = alpha
+    ? { label: "Alpha", color: accent }
+    : subTier === "free"
+      ? { label: "Free", color: tertiaryColor }
+      : subStatus === "active"
+        ? { label: "Active", color: doneColor }
+        : subStatus === "past_due"
+          ? { label: "Past due", color: warnColor }
+          : subStatus === "canceled"
+            ? { label: "Canceled", color: failedColor }
+            : { label: "Inactive", color: tertiaryColor };
+  const planNote = alpha
+    ? "Billing isn't live yet. Every Pro feature is unlocked during the alpha."
+    : subTier === "free"
+      ? "Editor only. Pair a Mac to dispatch a note."
+      : buildPaidNote({
+          tier: subTier,
+          used: subUsed,
+          quota: subQuota,
+          periodEnd: subPeriodEnd,
+        });
+
+  const profileName = user?.fullName ?? null;
+  const profileEmail = user?.primaryEmailAddress?.emailAddress ?? null;
+  const profileImage = user?.imageUrl ?? null;
 
   return (
     <View
@@ -331,480 +411,517 @@ function SettingsSheetMounted({
             panelStyle,
           ]}
         >
-        {/* Drag handle + header — the pan-gesture surface. The list below
-            scrolls independently so the two never compete. */}
-        <GestureDetector gesture={pan}>
-          <View>
-            <View
-              style={{
-                width: "100%",
-                paddingTop: 12,
-                paddingBottom: 8,
-                alignItems: "center",
-              }}
-            >
+          {/* Drag handle + header — the pan-gesture surface. The list below
+              scrolls independently so the two never compete. */}
+          <GestureDetector gesture={pan}>
+            <View>
               <View
                 style={{
-                  width: 36,
-                  height: 4,
-                  borderRadius: 999,
-                  backgroundColor: tertiaryColor,
+                  width: "100%",
+                  paddingTop: 12,
+                  paddingBottom: 8,
+                  alignItems: "center",
                 }}
-              />
-            </View>
-
-            {/* Header. */}
-            <View
-              style={{
-                paddingHorizontal: 24,
-                paddingVertical: 8,
-                flexDirection: "row",
-                justifyContent: "space-between",
-                alignItems: "center",
-              }}
-            >
-              <Text variant="title" style={{ color: inkColor }}>
-                Settings
-              </Text>
-              <Pressable
-                onPress={onClose}
-                accessibilityRole="button"
-                accessibilityLabel="Close"
-                hitSlop={8}
-                style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
               >
                 <View
                   style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 16,
-                    alignItems: "center",
-                    justifyContent: "center",
+                    width: 36,
+                    height: 4,
+                    borderRadius: 999,
+                    backgroundColor: tertiaryColor,
                   }}
-                >
-                  <XIcon size={20} color={subtleColor} weight="regular" />
-                </View>
-              </Pressable>
-            </View>
-          </View>
-        </GestureDetector>
-
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={{
-            paddingHorizontal: 20,
-            paddingTop: 8,
-            paddingBottom: 32,
-            gap: 24,
-          }}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* -------------------- Account -------------------- */}
-          <Section title="Account" subtleColor={subtleColor}>
-            <SectionCard cardBg={cardBg} borderColor={borderColor}>
-              <Row
-                Icon={UserIcon}
-                label="Profile"
-                inkColor={inkColor}
-                subtleColor={subtleColor}
-                tertiaryColor={tertiaryColor}
-                onPress={() => onShowComingSoon?.("Profile")}
-              />
-              <Divider color={borderColor} />
-              <Row
-                Icon={CreditCardIcon}
-                label="Subscription"
-                subtitle="BYO Anthropic key · $15/mo"
-                inkColor={inkColor}
-                subtleColor={subtleColor}
-                tertiaryColor={tertiaryColor}
-                onPress={() => onShowComingSoon?.("Subscription")}
-              />
-            </SectionCard>
-          </Section>
-
-          {/* -------------------- Connectivity ----------------
-              Highlighted with an ember accent bar on the left edge of the
-              card. Title is tappable too — it opens IntegrationsSheet, which
-              is the full-control surface for these connections. */}
-          <Section
-            title="Connectivity"
-            subtleColor={subtleColor}
-            accentTint={accent}
-            onTitlePress={onOpenIntegrations}
-          >
-            <View
-              style={{
-                flexDirection: "row",
-                borderRadius: 14,
-                overflow: "hidden",
-                borderWidth: 1,
-                borderColor: borderColor,
-                backgroundColor: cardBg,
-              }}
-            >
-              {/* Accent bar */}
-              <View style={{ width: 3, backgroundColor: accent }} />
-              <View style={{ flex: 1 }}>
-                {/* Mac — first because it's the core integration. */}
-                <Row
-                  Icon={LaptopIcon}
-                  label="Mac"
-                  subtitle={
-                    macConnected
-                      ? `Paired with ${macHost}`
-                      : "Scan the QR from Wend.app"
-                  }
-                  inkColor={inkColor}
-                  subtleColor={subtleColor}
-                  tertiaryColor={tertiaryColor}
-                  onPress={onConnectMac}
-                  trailing={
-                    macConnected ? (
-                      <StatusPip
-                        label="Paired"
-                        color={tokens["status-done"]}
-                      />
-                    ) : (
-                      <SmallButtonText
-                        label="Connect"
-                        color={accent}
-                      />
-                    )
-                  }
-                />
-                {cloudEnabled ? (
-                  <>
-                    <Divider color={borderColor} />
-                    <Row
-                      Icon={GithubLogoIcon}
-                      label="GitHub"
-                      subtitle={
-                        cloudGithubConnected
-                          ? `Installed · ${cloudGithubLogin ? `@${cloudGithubLogin}` : "your account"}`
-                          : "Connect for cloud dispatch"
-                      }
-                      inkColor={inkColor}
-                      subtleColor={subtleColor}
-                      tertiaryColor={tertiaryColor}
-                      onPress={onConnectCloudGitHub ?? (() => {})}
-                      trailing={
-                        cloudGithubConnected ? (
-                          <StatusPip
-                            label="Active"
-                            color={tokens["status-done"]}
-                          />
-                        ) : (
-                          <SmallButtonText
-                            label="Connect"
-                            color={accent}
-                          />
-                        )
-                      }
-                    />
-                  </>
-                ) : null}
-                <Divider color={borderColor} />
-                <Row
-                  Icon={KanbanIcon}
-                  label="Linear"
-                  subtitle={
-                    linearStatus == null
-                      ? "Checking…"
-                      : linearStatus.connected
-                        ? `Active · ${linearStatus.accountLabel ?? "Connected"}`
-                        : "Connect workspace"
-                  }
-                  inkColor={inkColor}
-                  subtleColor={subtleColor}
-                  tertiaryColor={tertiaryColor}
-                  onPress={onLinearRowPress}
-                  trailing={
-                    linearBusy ? (
-                      <ActivityIndicator color={subtleColor} />
-                    ) : linearStatus?.connected ? (
-                      <StatusPip
-                        label="Active"
-                        color={tokens["status-done"]}
-                      />
-                    ) : (
-                      <SmallButtonText label="Connect" color={accent} />
-                    )
-                  }
                 />
               </View>
+
+              {/* Header. */}
+              <View
+                style={{
+                  paddingHorizontal: 24,
+                  paddingVertical: 8,
+                  flexDirection: "row",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
+                <Text variant="title" style={{ color: inkColor }}>
+                  Settings
+                </Text>
+                <Pressable
+                  onPress={onClose}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close"
+                  hitSlop={8}
+                  style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+                >
+                  <View
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 16,
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <XIcon size={20} color={subtleColor} weight="regular" />
+                  </View>
+                </Pressable>
+              </View>
             </View>
-          </Section>
+          </GestureDetector>
 
-          {/* -------------------- Subscription ----------------- */}
-          <Section title="Subscription" subtleColor={subtleColor}>
-            <SectionCard cardBg={cardBg} borderColor={borderColor}>
-              <Row
-                Icon={StarIcon}
-                label={
-                  subPaywallsOff ? "Alpha · all features unlocked" :
-                  subTier === "pro" ? "Wend Pro" :
-                  subTier === "cloud_paygo" ? "Wend Cloud (paygo)" :
-                  "Free"
-                }
-                subtitle={
-                  subPaywallsOff
-                    ? `No billing during alpha · ${subUsed} cloud dispatches this month`
-                    : subTier === "pro" && subStatus === "active"
-                      ? `Mac unlimited · ${subUsed}/${subQuota} cloud this month`
-                      : subTier === "free"
-                        ? "Editor only — upgrade to dispatch"
-                        : `Status: ${subStatus}`
-                }
-                inkColor={inkColor}
-                subtleColor={subtleColor}
-                tertiaryColor={tertiaryColor}
-                onPress={() => onShowComingSoon?.("Billing portal")}
-                trailing={
-                  subPaywallsOff ? (
-                    <StatusPip label="Alpha" color={tokens["accent-default"]} />
-                  ) : subTier === "free" ? (
-                    <SmallButtonText label="Upgrade" color={accent} />
-                  ) : (
-                    <StatusPip
-                      label={subStatus === "active" ? "Active" : subStatus}
-                      color={subStatus === "active" ? tokens["status-done"] : tokens["status-warn"]}
-                    />
-                  )
-                }
-              />
-            </SectionCard>
-          </Section>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{
+              paddingHorizontal: 20,
+              paddingTop: 8,
+              paddingBottom: 40,
+              gap: 24,
+            }}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* -------------------- Profile -------------------- */}
+            <ProfileHeader
+              name={profileName}
+              email={profileEmail}
+              imageUrl={profileImage}
+              cardBg={cardBg}
+              chipBg={chipBg}
+              borderColor={borderColor}
+              inkColor={inkColor}
+              subtleColor={subtleColor}
+              accent={accent}
+            />
 
-          {/* -------------------- Cloud (optional) -------------
-              Two opt-in connections that unlock cloud-dispatch as a
-              fallback when no Mac is paired. Both are skippable; the
-              Mac path keeps working without them. */}
-          {cloudEnabled && (onConnectAnthropic || onConnectCloudGitHub) ? (
-            <Section title="Cloud" subtleColor={subtleColor}>
+            {/* -------------------- Subscription ---------------- */}
+            <Section title="Subscription" subtleColor={subtleColor}>
               <SectionCard cardBg={cardBg} borderColor={borderColor}>
                 <View
                   style={{
                     flexDirection: "row",
                     alignItems: "center",
                     paddingHorizontal: 14,
-                    paddingVertical: 12,
-                    gap: 12,
+                    paddingVertical: 14,
                   }}
                 >
-                  <View style={{ flex: 1 }}>
+                  <View
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 999,
+                      backgroundColor: `${accent}1F`,
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginRight: 12,
+                    }}
+                  >
+                    <StarIcon size={18} color={accent} weight="fill" />
+                  </View>
+                  <View style={{ flex: 1, paddingRight: 8 }}>
                     <Text
                       style={{
+                        color: inkColor,
                         fontFamily: "Inter-SemiBold",
                         fontSize: 15,
-                        color: inkColor,
+                        lineHeight: 20,
                       }}
+                      numberOfLines={1}
                     >
-                      Dispatch mode
+                      {planName}
                     </Text>
                     <Text
                       style={{
-                        marginTop: 2,
+                        color: subtleColor,
                         fontFamily: "Inter-Regular",
                         fontSize: 12,
-                        color: subtleColor,
+                        lineHeight: 16,
+                        marginTop: 2,
                       }}
                     >
-                      {dispatchMode === "mac"
-                        ? "Sends route to your paired Mac"
-                        : "Sends spin up ephemeral cloud agents"}
+                      {planNote}
                     </Text>
                   </View>
+                  <StatusPip label={planBadge.label} color={planBadge.color} />
+                </View>
+              </SectionCard>
+            </Section>
+
+            {/* -------------------- Connectivity ----------------
+                Highlighted with an ember accent bar on the left edge of the
+                card. Title is tappable too — it opens IntegrationsSheet, which
+                is the full-control surface for these connections. */}
+            <Section
+              title="Connectivity"
+              subtleColor={subtleColor}
+              accentTint={accent}
+              onTitlePress={onOpenIntegrations}
+            >
+              <View
+                style={{
+                  flexDirection: "row",
+                  borderRadius: 14,
+                  overflow: "hidden",
+                  borderWidth: 1,
+                  borderColor: borderColor,
+                  backgroundColor: cardBg,
+                }}
+              >
+                {/* Accent bar */}
+                <View style={{ width: 3, backgroundColor: accent }} />
+                <View style={{ flex: 1 }}>
+                  {/* Mac — first because it's the core integration. */}
+                  <Row
+                    Icon={LaptopIcon}
+                    label="Mac"
+                    subtitle={
+                      macConnected
+                        ? `Paired with ${macHost}`
+                        : "Scan the QR from Wend.app"
+                    }
+                    inkColor={inkColor}
+                    subtleColor={subtleColor}
+                    tertiaryColor={tertiaryColor}
+                    onPress={onConnectMac}
+                    trailing={
+                      macConnected ? (
+                        <StatusPip label="Paired" color={doneColor} />
+                      ) : (
+                        <SmallButtonText label="Connect" color={accent} />
+                      )
+                    }
+                  />
+                  {cloudEnabled ? (
+                    <>
+                      <Divider color={borderColor} />
+                      <Row
+                        Icon={GithubLogoIcon}
+                        label="GitHub"
+                        subtitle={
+                          cloudGithubConnected
+                            ? `Installed · ${cloudGithubLogin ? `@${cloudGithubLogin}` : "your account"}`
+                            : "Connect for cloud dispatch"
+                        }
+                        inkColor={inkColor}
+                        subtleColor={subtleColor}
+                        tertiaryColor={tertiaryColor}
+                        onPress={onConnectCloudGitHub ?? (() => {})}
+                        trailing={
+                          cloudGithubConnected ? (
+                            <StatusPip label="Active" color={doneColor} />
+                          ) : (
+                            <SmallButtonText label="Connect" color={accent} />
+                          )
+                        }
+                      />
+                    </>
+                  ) : null}
+                  <Divider color={borderColor} />
+                  <Row
+                    Icon={KanbanIcon}
+                    label="Linear"
+                    subtitle={
+                      linearStatus == null
+                        ? "Checking…"
+                        : linearStatus.connected
+                          ? `Active · ${linearStatus.accountLabel ?? "Connected"}`
+                          : "Connect workspace"
+                    }
+                    inkColor={inkColor}
+                    subtleColor={subtleColor}
+                    tertiaryColor={tertiaryColor}
+                    onPress={onLinearRowPress}
+                    trailing={
+                      linearBusy ? (
+                        <ActivityIndicator color={subtleColor} />
+                      ) : linearStatus?.connected ? (
+                        <StatusPip label="Active" color={doneColor} />
+                      ) : (
+                        <SmallButtonText label="Connect" color={accent} />
+                      )
+                    }
+                  />
+                </View>
+              </View>
+            </Section>
+
+            {/* -------------------- Cloud (optional) -------------
+                Two opt-in connections that unlock cloud-dispatch as a
+                fallback when no Mac is paired. Both are skippable; the
+                Mac path keeps working without them. */}
+            {cloudEnabled && (onConnectAnthropic || onConnectCloudGitHub) ? (
+              <Section title="Cloud" subtleColor={subtleColor}>
+                <SectionCard cardBg={cardBg} borderColor={borderColor}>
                   <View
                     style={{
                       flexDirection: "row",
-                      borderWidth: 1,
-                      borderColor: borderColor,
-                      borderRadius: 8,
-                      overflow: "hidden",
+                      alignItems: "center",
+                      paddingHorizontal: 14,
+                      paddingVertical: 12,
+                      gap: 12,
                     }}
                   >
-                    {(["mac", "cloud"] as const).map((m) => {
-                      const active = dispatchMode === m;
-                      return (
-                        <Pressable
-                          key={m}
-                          onPress={() => setDispatchMode(m)}
-                          accessibilityLabel={`Set dispatch mode to ${m}`}
-                          android_ripple={{ color: "rgba(0,0,0,0.08)" }}
-                        >
-                          <View
-                            style={{
-                              paddingHorizontal: 12,
-                              paddingVertical: 6,
-                              backgroundColor: active ? accent : "transparent",
-                            }}
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={{
+                          fontFamily: "Inter-SemiBold",
+                          fontSize: 15,
+                          color: inkColor,
+                        }}
+                      >
+                        Dispatch mode
+                      </Text>
+                      <Text
+                        style={{
+                          marginTop: 2,
+                          fontFamily: "Inter-Regular",
+                          fontSize: 12,
+                          color: subtleColor,
+                        }}
+                      >
+                        {dispatchMode === "mac"
+                          ? "Sends route to your paired Mac"
+                          : "Sends spin up ephemeral cloud agents"}
+                      </Text>
+                    </View>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        borderWidth: 1,
+                        borderColor: borderColor,
+                        borderRadius: 8,
+                        overflow: "hidden",
+                      }}
+                    >
+                      {(["mac", "cloud"] as const).map((m) => {
+                        const active = dispatchMode === m;
+                        return (
+                          <Pressable
+                            key={m}
+                            onPress={() => setDispatchMode(m)}
+                            accessibilityLabel={`Set dispatch mode to ${m}`}
+                            android_ripple={{ color: "rgba(0,0,0,0.08)" }}
                           >
-                            <Text
+                            <View
                               style={{
-                                fontFamily: "Inter-SemiBold",
-                                fontSize: 12,
-                                letterSpacing: 0.3,
-                                color: active ? accentOn : subtleColor,
-                                textTransform: "uppercase",
+                                paddingHorizontal: 12,
+                                paddingVertical: 6,
+                                backgroundColor: active ? accent : "transparent",
                               }}
                             >
-                              {m}
-                            </Text>
-                          </View>
-                        </Pressable>
-                      );
-                    })}
+                              <Text
+                                style={{
+                                  fontFamily: "Inter-SemiBold",
+                                  fontSize: 12,
+                                  letterSpacing: 0.3,
+                                  color: active ? accentOn : subtleColor,
+                                  textTransform: "uppercase",
+                                }}
+                              >
+                                {m}
+                              </Text>
+                            </View>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
                   </View>
-                </View>
-                <Divider color={borderColor} />
-                {onConnectAnthropic ? (
-                  <Row
-                    Icon={SparkleIcon}
-                    label="Anthropic key"
-                    subtitle={
-                      anthropicConnected
-                        ? "Connected · billed to your Anthropic API account"
-                        : "Required for cloud dispatches"
-                    }
-                    inkColor={inkColor}
-                    subtleColor={subtleColor}
-                    tertiaryColor={tertiaryColor}
-                    onPress={onConnectAnthropic}
-                    trailing={
-                      anthropicConnected ? (
-                        <StatusPip label="Set" color={tokens["status-done"]} />
-                      ) : (
-                        <SmallButtonText label="Connect" color={accent} />
-                      )
-                    }
-                  />
-                ) : null}
-                {onConnectAnthropic && onConnectCloudGitHub ? (
                   <Divider color={borderColor} />
-                ) : null}
-                {onConnectCloudGitHub ? (
-                  <Row
-                    Icon={GithubLogoIcon}
-                    label="Repo access"
-                    subtitle={
-                      cloudGithubConnected
-                        ? `Wend Cloud installed · ${cloudGithubLogin ? "@" + cloudGithubLogin : "active"}`
-                        : "Optional · install the read-only GitHub App"
-                    }
-                    inkColor={inkColor}
-                    subtleColor={subtleColor}
-                    tertiaryColor={tertiaryColor}
-                    onPress={onConnectCloudGitHub}
-                    trailing={
-                      cloudGithubConnected ? (
-                        <StatusPip label="Set" color={tokens["status-done"]} />
-                      ) : (
-                        <SmallButtonText label="Connect" color={accent} />
-                      )
-                    }
-                  />
-                ) : null}
+                  {onConnectAnthropic ? (
+                    <Row
+                      Icon={KeyIcon}
+                      label="Anthropic key"
+                      subtitle={
+                        anthropicConnected
+                          ? anthropicKeyLast4
+                            ? `Connected · sk-ant-…${anthropicKeyLast4}`
+                            : "Connected · billed to your Anthropic account"
+                          : "Required for cloud dispatches"
+                      }
+                      inkColor={inkColor}
+                      subtleColor={subtleColor}
+                      tertiaryColor={tertiaryColor}
+                      onPress={onConnectAnthropic}
+                      trailing={
+                        anthropicConnected ? (
+                          <StatusPip label="Set" color={doneColor} />
+                        ) : (
+                          <SmallButtonText label="Connect" color={accent} />
+                        )
+                      }
+                    />
+                  ) : null}
+                  {onConnectAnthropic && onConnectCloudGitHub ? (
+                    <Divider color={borderColor} />
+                  ) : null}
+                  {onConnectCloudGitHub ? (
+                    <Row
+                      Icon={GithubLogoIcon}
+                      label="Repo access"
+                      subtitle={
+                        cloudGithubConnected
+                          ? `Wend Cloud installed · ${cloudGithubLogin ? "@" + cloudGithubLogin : "active"}`
+                          : "Optional · install the read-only GitHub App"
+                      }
+                      inkColor={inkColor}
+                      subtleColor={subtleColor}
+                      tertiaryColor={tertiaryColor}
+                      onPress={onConnectCloudGitHub}
+                      trailing={
+                        cloudGithubConnected ? (
+                          <StatusPip label="Set" color={doneColor} />
+                        ) : (
+                          <SmallButtonText label="Connect" color={accent} />
+                        )
+                      }
+                    />
+                  ) : null}
+                </SectionCard>
+              </Section>
+            ) : null}
+
+            {/* -------------------- Preferences ----------------- */}
+            <Section title="Preferences" subtleColor={subtleColor}>
+              <SectionCard cardBg={cardBg} borderColor={borderColor}>
+                <Row
+                  Icon={MoonStarsIcon}
+                  label="Theme"
+                  subtitle={themeSubtitle}
+                  inkColor={inkColor}
+                  subtleColor={subtleColor}
+                  tertiaryColor={tertiaryColor}
+                  onPress={cycleTheme}
+                />
+                <Divider color={borderColor} />
+                <Row
+                  Icon={CrosshairIcon}
+                  label="Wend on settle"
+                  subtitle="Fire when a thought lands. Off = tap to Wend."
+                  inkColor={inkColor}
+                  subtleColor={subtleColor}
+                  tertiaryColor={tertiaryColor}
+                  trailing={
+                    <Switch
+                      value={autoWendOnSettle}
+                      onValueChange={setAutoWendOnSettle}
+                      trackColor={{ false: borderColor, true: accent }}
+                      thumbColor={accentOn}
+                    />
+                  }
+                  onPress={() => setAutoWendOnSettle(!autoWendOnSettle)}
+                  hideCaret
+                />
+                <Divider color={borderColor} />
+                <Row
+                  Icon={BellRingingIcon}
+                  label="Notifications"
+                  subtitle="Mentions and assignments only"
+                  inkColor={inkColor}
+                  subtleColor={subtleColor}
+                  tertiaryColor={tertiaryColor}
+                  trailing={
+                    <Switch
+                      value={notificationsEnabled}
+                      onValueChange={setNotificationsEnabled}
+                      trackColor={{ false: borderColor, true: accent }}
+                      thumbColor={accentOn}
+                    />
+                  }
+                  // The switch is the only interactive piece; tapping the row
+                  // itself toggles too, which matches platform expectation.
+                  onPress={() => setNotificationsEnabled(!notificationsEnabled)}
+                  hideCaret
+                />
               </SectionCard>
             </Section>
-          ) : null}
 
-          {/* -------------------- Preferences ----------------- */}
-          <Section title="Preferences" subtleColor={subtleColor}>
-            <SectionCard cardBg={cardBg} borderColor={borderColor}>
-              <Row
-                Icon={MoonStarsIcon}
-                label="Theme"
-                subtitle={themeSubtitle}
-                inkColor={inkColor}
-                subtleColor={subtleColor}
-                tertiaryColor={tertiaryColor}
-                onPress={cycleTheme}
-              />
-              <Divider color={borderColor} />
-              <Row
-                Icon={CrosshairIcon}
-                label="Wend on settle"
-                subtitle="Fire when a thought lands. Off = tap to Wend."
-                inkColor={inkColor}
-                subtleColor={subtleColor}
-                tertiaryColor={tertiaryColor}
-                trailing={
-                  <Switch
-                    value={autoWendOnSettle}
-                    onValueChange={setAutoWendOnSettle}
-                    trackColor={{ false: borderColor, true: accent }}
-                    thumbColor={accentOn}
-                  />
-                }
-                onPress={() => setAutoWendOnSettle(!autoWendOnSettle)}
-                hideCaret
-              />
-              <Divider color={borderColor} />
-              <Row
-                Icon={BellRingingIcon}
-                label="Notifications"
-                subtitle="Mentions & assignments only"
-                inkColor={inkColor}
-                subtleColor={subtleColor}
-                tertiaryColor={tertiaryColor}
-                trailing={
-                  <Switch
-                    value={notificationsEnabled}
-                    onValueChange={setNotificationsEnabled}
-                    trackColor={{ false: borderColor, true: accent }}
-                    thumbColor={accentOn}
-                  />
-                }
-                // The switch is the only interactive piece; tapping the row
-                // itself toggles too, which matches platform expectation.
-                onPress={() => setNotificationsEnabled(!notificationsEnabled)}
-                hideCaret
-              />
-            </SectionCard>
-          </Section>
+            {/* -------------------- Account (destructive) --------
+                Log out is the primary action; Delete account sits below it
+                as a quieter, clearly irreversible affordance. Both use the
+                wrapper-View pattern so cssInterop can't strip layout off the
+                function-form Pressable. */}
+            <Section title="Account" subtleColor={subtleColor}>
+              <View style={{ gap: 12 }}>
+                <Pressable
+                  onPress={onSignOut}
+                  accessibilityRole="button"
+                  accessibilityLabel="Log out"
+                  android_ripple={{ color: "rgba(0,0,0,0.06)" }}
+                  style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1 })}
+                >
+                  <View
+                    style={{
+                      height: 52,
+                      borderRadius: 14,
+                      backgroundColor: cardBg,
+                      borderWidth: 1,
+                      borderColor: borderColor,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 10,
+                    }}
+                  >
+                    <SignOutIcon size={18} color={inkColor} weight="regular" />
+                    <Text
+                      style={{
+                        color: inkColor,
+                        fontFamily: "Inter-SemiBold",
+                        fontSize: 15,
+                      }}
+                    >
+                      Log out
+                    </Text>
+                  </View>
+                </Pressable>
 
-          {/* -------------------- Log out (destructive) --------
-              Pressable wraps content; function-style only carries opacity.
-              All visual + layout (red bg, height, row centering, shadow)
-              lives on a static-style inner View so cssInterop can't strip
-              it. Same proven pattern as the Row above. */}
-          <Pressable
-            onPress={onSignOut}
-            accessibilityRole="button"
-            accessibilityLabel="Log out"
-            android_ripple={{ color: "rgba(255,255,255,0.18)" }}
-            style={{ marginTop: 8 }}
-          >
-            <View
-              style={{
-                height: 52,
-                borderRadius: 14,
-                backgroundColor: failedColor,
-                flexDirection: "row",
-                alignItems: "center",
-                justifyContent: "center",
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.12,
-                shadowRadius: 6,
-                elevation: 2,
-              }}
-            >
-              <SignOutIcon size={20} color="#FFFFFF" weight="bold" />
-              <Text
-                style={{
-                  color: "#FFFFFF",
-                  marginLeft: 10,
-                  fontFamily: "Inter-SemiBold",
-                  fontSize: 15,
-                }}
-              >
-                Log out
-              </Text>
-            </View>
-          </Pressable>
-        </ScrollView>
+                <Pressable
+                  onPress={confirmDeleteAccount}
+                  disabled={deleting}
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete account"
+                  style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+                >
+                  <View
+                    style={{
+                      height: 44,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 8,
+                      opacity: deleting ? 0.5 : 1,
+                    }}
+                  >
+                    {deleting ? (
+                      <ActivityIndicator color={failedColor} size="small" />
+                    ) : (
+                      <TrashIcon size={15} color={failedColor} weight="regular" />
+                    )}
+                    <Text
+                      style={{
+                        color: failedColor,
+                        fontFamily: "Inter-Medium",
+                        fontSize: 13,
+                      }}
+                    >
+                      {deleting ? "Deleting account…" : "Delete account"}
+                    </Text>
+                  </View>
+                </Pressable>
+                <Text
+                  style={{
+                    color: tertiaryColor,
+                    fontFamily: "Inter-Regular",
+                    fontSize: 11,
+                    lineHeight: 15,
+                    textAlign: "center",
+                    paddingHorizontal: 24,
+                  }}
+                >
+                  Deleting your account erases it permanently. This can't be
+                  undone.
+                </Text>
+              </View>
+            </Section>
+          </ScrollView>
         </Animated.View>
       </Animated.View>
     </View>
@@ -814,6 +931,134 @@ function SettingsSheetMounted({
 /* ---------------------------------------------------------------------------
    Section primitives — small private helpers, only used by this sheet.
    --------------------------------------------------------------------------- */
+
+function buildPaidNote({
+  tier,
+  used,
+  quota,
+  periodEnd,
+}: {
+  tier: "free" | "pro" | "cloud_paygo";
+  used: number;
+  quota: number;
+  periodEnd: string | null;
+}): string {
+  const parts: string[] = [];
+  if (tier === "pro") parts.push("Mac dispatch included.");
+  if (cloudEnabled && quota > 0)
+    parts.push(`${used}/${quota} cloud dispatches this month.`);
+  if (periodEnd) {
+    const d = new Date(periodEnd);
+    if (!Number.isNaN(d.getTime())) {
+      parts.push(
+        `Renews ${d.toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        })}.`,
+      );
+    }
+  }
+  return parts.length ? parts.join(" ") : "Subscription active.";
+}
+
+function ProfileHeader({
+  name,
+  email,
+  imageUrl,
+  cardBg,
+  chipBg,
+  borderColor,
+  inkColor,
+  subtleColor,
+  accent,
+}: {
+  name: string | null;
+  email: string | null;
+  imageUrl: string | null;
+  cardBg: string;
+  chipBg: string;
+  borderColor: string;
+  inkColor: string;
+  subtleColor: string;
+  accent: string;
+}) {
+  const initial =
+    (name ?? email ?? "?").trim().charAt(0).toUpperCase() || "?";
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 14,
+        backgroundColor: cardBg,
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: borderColor,
+        padding: 16,
+      }}
+    >
+      <View
+        style={{
+          width: 52,
+          height: 52,
+          borderRadius: 26,
+          overflow: "hidden",
+          backgroundColor: chipBg,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {imageUrl ? (
+          <Image
+            source={{ uri: imageUrl }}
+            style={{ width: 52, height: 52 }}
+            contentFit="cover"
+            transition={120}
+            accessibilityIgnoresInvertColors
+          />
+        ) : (
+          <Text
+            style={{
+              fontFamily: "Inter-SemiBold",
+              fontSize: 22,
+              color: accent,
+            }}
+          >
+            {initial}
+          </Text>
+        )}
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text
+          style={{
+            color: inkColor,
+            fontFamily: "Inter-SemiBold",
+            fontSize: 17,
+            lineHeight: 22,
+          }}
+          numberOfLines={1}
+        >
+          {name ?? "Your account"}
+        </Text>
+        {email ? (
+          <Text
+            style={{
+              color: subtleColor,
+              fontFamily: "Inter-Regular",
+              fontSize: 13,
+              lineHeight: 18,
+              marginTop: 2,
+            }}
+            numberOfLines={1}
+          >
+            {email}
+          </Text>
+        ) : null}
+      </View>
+    </View>
+  );
+}
 
 function Section({
   title,
@@ -936,6 +1181,7 @@ function Row({
         alignItems: "center",
         paddingHorizontal: 14,
         paddingVertical: 12,
+        minHeight: 56,
       }}
     >
       <View
