@@ -29,7 +29,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import {
   CaretLeftIcon,
+  GitBranchIcon,
+  LaptopIcon,
   MagnifyingGlassIcon,
+  TerminalWindowIcon,
   XCircleIcon,
 } from "phosphor-react-native";
 
@@ -158,11 +161,27 @@ export default function SessionsScreen() {
         </CenteredState>
       ) : status === "not-ready" ? (
         <CenteredState>
+          <EmptyGlyph chip={chip} border={border} tertiary={tertiary}>
+            <LaptopIcon size={30} color={tertiary} weight="light" />
+          </EmptyGlyph>
           <Text
-            variant="meta"
+            variant="body-em"
             style={{ color: subtle, textAlign: "center", maxWidth: 280 }}
           >
-            Pair your Mac to see its Claude Code sessions here.
+            Pair your Mac to see its sessions
+          </Text>
+          <Text
+            variant="caption"
+            style={{
+              color: tertiary,
+              textAlign: "center",
+              maxWidth: 260,
+              marginTop: 8,
+              lineHeight: 18,
+            }}
+          >
+            Every Claude Code session on your Mac shows up here, ready to
+            reopen.
           </Text>
         </CenteredState>
       ) : status === "error" ? (
@@ -187,11 +206,14 @@ export default function SessionsScreen() {
         </CenteredState>
       ) : sessions.length === 0 ? (
         <CenteredState>
+          <EmptyGlyph chip={chip} border={border} tertiary={tertiary}>
+            <TerminalWindowIcon size={28} color={tertiary} weight="light" />
+          </EmptyGlyph>
           <Text
-            variant="meta"
+            variant="body-em"
             style={{ color: subtle, textAlign: "center", maxWidth: 280 }}
           >
-            No Claude Code sessions on this Mac yet.
+            No sessions yet
           </Text>
           <Text
             variant="caption"
@@ -200,6 +222,7 @@ export default function SessionsScreen() {
               textAlign: "center",
               maxWidth: 280,
               marginTop: 8,
+              lineHeight: 18,
             }}
           >
             Run{" "}
@@ -214,18 +237,27 @@ export default function SessionsScreen() {
         </CenteredState>
       ) : searching && filtered.length === 0 ? (
         <CenteredState>
+          <EmptyGlyph chip={chip} border={border} tertiary={tertiary}>
+            <MagnifyingGlassIcon size={26} color={tertiary} weight="light" />
+          </EmptyGlyph>
           <Text
-            variant="meta"
+            variant="body-em"
             style={{ color: subtle, textAlign: "center", maxWidth: 280 }}
           >
-            No sessions match “{query.trim()}”.
+            No sessions match
+          </Text>
+          <Text
+            variant="caption"
+            style={{ color: tertiary, textAlign: "center", marginTop: 6 }}
+          >
+            Try a different project or title.
           </Text>
         </CenteredState>
       ) : searching ? (
         <FlatList
           data={filtered}
           keyExtractor={(s) => s.id}
-          contentContainerStyle={{ paddingTop: 4, paddingBottom: 24 }}
+          contentContainerStyle={{ paddingTop: 8, paddingBottom: 32 }}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           refreshControl={refreshControl}
@@ -237,6 +269,7 @@ export default function SessionsScreen() {
               subtle={subtle}
               tertiary={tertiary}
               chip={chip}
+              border={border}
               accent={accent}
               onPress={() => openSession(item)}
             />
@@ -246,20 +279,16 @@ export default function SessionsScreen() {
         <SectionList
           sections={sections}
           keyExtractor={(s) => s.id}
-          stickySectionHeadersEnabled
-          contentContainerStyle={{ paddingTop: 4, paddingBottom: 24 }}
+          stickySectionHeadersEnabled={false}
+          contentContainerStyle={{ paddingTop: 8, paddingBottom: 32 }}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           refreshControl={refreshControl}
           renderSectionHeader={({ section }) => (
             <SectionHeader
               project={section.project}
-              count={section.data.length}
               first={section.index === 0}
-              canvas={canvas}
               subtle={subtle}
-              tertiary={tertiary}
-              chip={chip}
             />
           )}
           renderItem={({ item }) => (
@@ -270,6 +299,7 @@ export default function SessionsScreen() {
               subtle={subtle}
               tertiary={tertiary}
               chip={chip}
+              border={border}
               accent={accent}
               onPress={() => openSession(item)}
             />
@@ -282,60 +312,31 @@ export default function SessionsScreen() {
 
 function SectionHeader({
   project,
-  count,
   first,
-  canvas,
   subtle,
-  tertiary,
-  chip,
 }: {
   project: string;
-  count: number;
   first: boolean;
-  canvas: string;
   subtle: string;
-  tertiary: string;
-  chip: string;
 }) {
   return (
     <View
       accessibilityRole="header"
-      accessibilityLabel={count >= 2 ? `${project}, ${count} sessions` : project}
+      accessibilityLabel={project}
       style={{
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        height: 34,
-        paddingLeft: 22,
-        paddingRight: 22,
-        marginTop: first ? 0 : 10,
-        backgroundColor: canvas,
+        paddingLeft: 20,
+        paddingRight: 20,
+        paddingTop: first ? 4 : 28,
+        paddingBottom: 10,
       }}
     >
       <Text
         variant="mono-inline"
         numberOfLines={1}
-        style={{ color: subtle, flexShrink: 1 }}
+        style={{ color: subtle, letterSpacing: -0.2 }}
       >
         {project}
       </Text>
-      {count >= 2 ? (
-        <View
-          style={{
-            marginLeft: 8,
-            height: 18,
-            paddingHorizontal: 6,
-            borderRadius: 5,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: chip,
-          }}
-        >
-          <Text variant="caption" style={{ color: tertiary }}>
-            {count}
-          </Text>
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -347,6 +348,7 @@ function SessionRow({
   subtle,
   tertiary,
   chip,
+  border,
   accent,
   onPress,
 }: {
@@ -356,12 +358,11 @@ function SessionRow({
   subtle: string;
   tertiary: string;
   chip: string;
+  border: string;
   accent: string;
   onPress: () => void;
 }) {
   const identity = resolveIdentity(session);
-  const count = session.messageCount;
-  const hasCount = typeof count === "number" && count > 0;
   const relativeTime = formatSessionTime(session.lastModified);
   const showBranch =
     !identity.isWend && classifyBranch(session.gitBranch) === "FEATURE";
@@ -378,15 +379,12 @@ function SessionRow({
       style={({ pressed }) => ({
         flexDirection: "row",
         alignItems: "flex-start",
-        gap: 10,
-        marginHorizontal: 10,
-        paddingHorizontal: 12,
-        paddingVertical: 11,
-        borderRadius: 12,
+        paddingHorizontal: 20,
+        paddingVertical: 12,
         backgroundColor: pressed ? chip : "transparent",
       })}
     >
-      <View style={{ width: 16, alignItems: "center" }}>
+      <View style={{ width: 16, alignItems: "flex-start" }}>
         {identity.isWend ? (
           <View
             style={{
@@ -399,12 +397,11 @@ function SessionRow({
           />
         ) : (
           <Text
-            variant="caption"
             style={{
               fontFamily: MONO,
               fontSize: 12,
               lineHeight: 16,
-              marginTop: 4,
+              marginTop: 5,
               color: tertiary,
             }}
           >
@@ -413,7 +410,14 @@ function SessionRow({
         )}
       </View>
 
-      <View style={{ flex: 1, flexDirection: "row", alignItems: "flex-start" }}>
+      <View
+        style={{
+          flex: 1,
+          marginLeft: 12,
+          flexDirection: "row",
+          alignItems: "flex-start",
+        }}
+      >
         <View style={{ flex: 1 }}>
           {identity.isWend ? (
             <Text
@@ -448,43 +452,57 @@ function SessionRow({
           )}
 
           <Text
-            variant="caption"
             numberOfLines={1}
-            style={{ color: tertiary, marginTop: 3 }}
+            style={{
+              fontFamily: "Inter-Medium",
+              fontSize: 13,
+              lineHeight: 16,
+              color: tertiary,
+              marginTop: 4,
+            }}
           >
             {searching ? (
-              <Text
-                variant="caption"
-                style={{ fontFamily: MONO, color: tertiary }}
-              >
+              <Text style={{ fontFamily: MONO, fontSize: 13, color: tertiary }}>
                 {session.project}
               </Text>
             ) : null}
-            {searching ? " · " : null}
+            {searching ? "  ·  " : null}
             {relativeTime}
-            {hasCount ? ` · ${count} ${count === 1 ? "msg" : "msgs"}` : null}
           </Text>
         </View>
 
         {showBranch ? (
           <View
             style={{
-              alignSelf: "center",
-              maxWidth: 120,
-              marginLeft: 8,
-              paddingHorizontal: 6,
-              paddingVertical: 1,
-              borderRadius: 5,
+              flexShrink: 0,
+              maxWidth: 130,
+              marginLeft: 10,
+              marginTop: 1,
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 4,
+              paddingLeft: 7,
+              paddingRight: 8,
+              paddingVertical: 3,
+              borderRadius: 6,
+              borderWidth: 1,
+              borderColor: border,
               backgroundColor: chip,
             }}
           >
+            <GitBranchIcon size={12} color={subtle} weight="bold" />
             <Text
-              variant="caption"
               numberOfLines={1}
               ellipsizeMode="tail"
-              style={{ fontFamily: MONO, color: tertiary }}
+              style={{
+                fontFamily: MONO,
+                fontSize: 11,
+                lineHeight: 15,
+                color: subtle,
+                flexShrink: 1,
+              }}
             >
-              {`⎇ ${session.gitBranch}`}
+              {session.gitBranch}
             </Text>
           </View>
         ) : null}
@@ -521,21 +539,22 @@ function SearchBar({
   const [focused, setFocused] = useState(false);
   const has = value.length > 0;
   return (
-    <View style={{ paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6 }}>
+    <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 6 }}>
       <View
         style={{
           flexDirection: "row",
           alignItems: "center",
-          gap: 8,
-          height: 38,
-          paddingHorizontal: 12,
-          borderRadius: 10,
-          borderWidth: 1,
-          borderColor: focused ? accent : border,
-          backgroundColor: chip,
+          gap: 10,
+          height: 40,
+          borderBottomWidth: 1,
+          borderBottomColor: focused ? accent : border,
         }}
       >
-        <MagnifyingGlassIcon size={16} color={tertiary} weight="bold" />
+        <MagnifyingGlassIcon
+          size={18}
+          color={focused ? accent : tertiary}
+          weight="regular"
+        />
         <TextInput
           value={value}
           onChangeText={onChangeText}
@@ -563,7 +582,7 @@ function SearchBar({
             hitSlop={8}
             style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
           >
-            <XCircleIcon size={17} color={subtle} weight="fill" />
+            <XCircleIcon size={18} color={subtle} weight="fill" />
           </Pressable>
         ) : null}
       </View>
@@ -643,6 +662,35 @@ function SegmentButton({
         {label}
       </Text>
     </Pressable>
+  );
+}
+
+function EmptyGlyph({
+  chip,
+  border,
+  children,
+}: {
+  chip: string;
+  border: string;
+  tertiary: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <View
+      style={{
+        width: 64,
+        height: 64,
+        borderRadius: 32,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: chip,
+        borderWidth: 1,
+        borderColor: border,
+        marginBottom: 18,
+      }}
+    >
+      {children}
+    </View>
   );
 }
 
