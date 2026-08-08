@@ -132,6 +132,9 @@ import {
 import { LiveMarkdownInput } from "@/components/editor/LiveMarkdownInput";
 import { ArmBar } from "@/components/editor/ArmBar";
 import { useArming } from "@/lib/dispatch/useArming";
+import { useDispatchQueue } from "@/lib/dispatch/useDispatchQueue";
+import { useIsNoteQueued } from "@/store/dispatchQueueSlice";
+import { QueuedPill } from "@/components/editor/QueuedPill";
 import { useRoutePreview, ROUTE_CONFIDENCE_MIN } from "@/lib/dispatch/useRoutePreview";
 import { useUiStore } from "@/store/uiSlice";
 import type {
@@ -314,6 +317,10 @@ export default function HomeScreen() {
   const { dispatch, running, cancel, isConfigured: daemonConfigured } =
     useDispatch();
   const resolvedDaemon = useResolvedDaemonURL();
+  // Durable dispatch queue: parked notes fire automatically once the Mac is
+  // reachable again (and on every foreground). Mount the driver once here.
+  useDispatchQueue();
+  const noteQueued = useIsNoteQueued(resolvedNoteId);
 
   /* ─── Catch up Mac runs finished while the phone was disconnected ─── */
   // Fire-and-forget dispatches complete on the Mac even if the app was
@@ -1411,6 +1418,14 @@ export default function HomeScreen() {
             onFireNow={arming.fireNow}
             onPickRepo={() => setRepoPickerOpen(true)}
           />
+        ) : null}
+
+        {/* ─── Queued indicator ─────────────────────────────────────────
+            This note has a dispatch parked in the durable queue — the Mac was
+            unreachable when it fired. It runs automatically on the next wake.
+            Hidden while streaming or while the arm bar owns this slot. */}
+        {noteQueued && !showArmBar && !isStreaming ? (
+          <QueuedPill bottomOffset={TOOLBAR_HEIGHT + 12} />
         ) : null}
 
         {/* ─── Keyboard toolbar ─────────────────────────────────────────
