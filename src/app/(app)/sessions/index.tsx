@@ -371,6 +371,13 @@ function SessionRow({
     ? `Open Wend run ${identity.a11yTitle}, ${session.project}, ${relativeTime}`
     : `Open session ${identity.a11yTitle}, ${session.project}, ${relativeTime}`;
 
+  const titleText = identity.isWend
+    ? identity.wendTitle ?? "Wend run"
+    : identity.untitled
+      ? "Untitled session"
+      : session.title;
+  const titleColor = !identity.isWend && !identity.untitled ? ink : subtle;
+
   return (
     <Pressable
       onPress={onPress}
@@ -378,135 +385,89 @@ function SessionRow({
       accessibilityLabel={a11yLabel}
       style={({ pressed }) => ({
         flexDirection: "row",
-        alignItems: "flex-start",
+        alignItems: "center",
         paddingHorizontal: 20,
-        paddingVertical: 12,
+        paddingVertical: 13,
         backgroundColor: pressed ? chip : "transparent",
       })}
     >
-      <View style={{ width: 16, alignItems: "flex-start" }}>
-        {identity.isWend ? (
-          <View
-            style={{
-              width: 6,
-              height: 6,
-              borderRadius: 3,
-              marginTop: 9,
-              backgroundColor: accent,
-            }}
-          />
-        ) : (
-          <Text
-            style={{
-              fontFamily: MONO,
-              fontSize: 12,
-              lineHeight: 16,
-              marginTop: 5,
-              color: tertiary,
-            }}
-          >
-            {">_"}
-          </Text>
-        )}
-      </View>
-
-      <View
-        style={{
-          flex: 1,
-          marginLeft: 12,
-          flexDirection: "row",
-          alignItems: "flex-start",
-        }}
-      >
-        <View style={{ flex: 1 }}>
+      <View style={{ flex: 1 }}>
+        <View style={{ flexDirection: "row", alignItems: "center" }}>
           {identity.isWend ? (
-            <Text
-              variant="body-em"
-              numberOfLines={1}
-              ellipsizeMode="tail"
-              style={{ color: subtle }}
-            >
-              <Text variant="body-em" style={{ color: subtle }}>
-                Wend run
-              </Text>
-              {identity.wendTitle ? (
-                <Text variant="body-em" style={{ color: tertiary }}>
-                  {" · "}
-                </Text>
-              ) : null}
-              {identity.wendTitle ? (
-                <Text variant="body-em" style={{ color: ink }}>
-                  {identity.wendTitle}
-                </Text>
-              ) : null}
-            </Text>
-          ) : (
-            <Text
-              variant="body-em"
-              numberOfLines={1}
-              ellipsizeMode="tail"
-              style={{ color: identity.untitled ? subtle : ink }}
-            >
-              {identity.untitled ? "Untitled session" : session.title}
-            </Text>
-          )}
-
+            <View
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: 3,
+                marginRight: 8,
+                backgroundColor: accent,
+              }}
+            />
+          ) : null}
           <Text
+            variant="body-em"
             numberOfLines={1}
-            style={{
-              fontFamily: "Inter-Medium",
-              fontSize: 13,
-              lineHeight: 16,
-              color: tertiary,
-              marginTop: 4,
-            }}
+            ellipsizeMode="tail"
+            style={{ flex: 1, color: titleColor }}
           >
-            {searching ? (
-              <Text style={{ fontFamily: MONO, fontSize: 13, color: tertiary }}>
-                {session.project}
-              </Text>
-            ) : null}
-            {searching ? "  ·  " : null}
-            {relativeTime}
+            {titleText}
           </Text>
         </View>
 
-        {showBranch ? (
-          <View
+        <Text
+          numberOfLines={1}
+          style={{
+            fontFamily: "Inter-Medium",
+            fontSize: 13,
+            lineHeight: 16,
+            color: tertiary,
+            marginTop: 3,
+          }}
+        >
+          {searching ? (
+            <Text style={{ fontFamily: MONO, fontSize: 13, color: tertiary }}>
+              {session.project}
+            </Text>
+          ) : null}
+          {searching ? "  ·  " : null}
+          {relativeTime}
+        </Text>
+      </View>
+
+      {showBranch ? (
+        <View
+          style={{
+            flexShrink: 0,
+            maxWidth: 130,
+            marginLeft: 12,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 4,
+            paddingLeft: 7,
+            paddingRight: 8,
+            paddingVertical: 3,
+            borderRadius: 6,
+            borderWidth: 1,
+            borderColor: border,
+            backgroundColor: chip,
+          }}
+        >
+          <GitBranchIcon size={12} color={subtle} weight="bold" />
+          <Text
+            numberOfLines={1}
+            ellipsizeMode="tail"
             style={{
-              flexShrink: 0,
-              maxWidth: 130,
-              marginLeft: 10,
-              marginTop: 1,
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 4,
-              paddingLeft: 7,
-              paddingRight: 8,
-              paddingVertical: 3,
-              borderRadius: 6,
-              borderWidth: 1,
-              borderColor: border,
-              backgroundColor: chip,
+              fontFamily: MONO,
+              fontSize: 11,
+              lineHeight: 15,
+              color: subtle,
+              flexShrink: 1,
             }}
           >
-            <GitBranchIcon size={12} color={subtle} weight="bold" />
-            <Text
-              numberOfLines={1}
-              ellipsizeMode="tail"
-              style={{
-                fontFamily: MONO,
-                fontSize: 11,
-                lineHeight: 15,
-                color: subtle,
-                flexShrink: 1,
-              }}
-            >
-              {session.gitBranch}
-            </Text>
-          </View>
-        ) : null}
-      </View>
+            {session.gitBranch}
+          </Text>
+        </View>
+      ) : null}
     </Pressable>
   );
 }
