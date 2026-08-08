@@ -55,6 +55,26 @@ import { bumpNotesVersion } from "@/store/notesCacheSlice";
 
 export type NoteBlockKind = "user_text"; // Phase 2 only; widens to schema enum later.
 
+/**
+ * A downloadable deliverable produced by a run. Shape mirrors the shared
+ * daemon contract (see wend-contract.md § Artifact shape). Bytes are served
+ * at `GET /run/<runId>/artifact/<id>?t=<token>` on the paired daemon; the
+ * virtual `answer` kind is served from the stored run text.
+ */
+export type ArtifactKind = "diff" | "file" | "html" | "answer" | "image";
+
+export interface Artifact {
+  /** Stable within a run: "diff" | "answer" | file-basename-slug. */
+  id: string;
+  /** Display name — "constants.ts", "draft.md", "Report". */
+  name: string;
+  kind: ArtifactKind;
+  /** "text/x-patch", "text/markdown", "text/html", "image/png", … */
+  mime: string;
+  /** Bytes. 0 allowed for the virtual answer artifact. */
+  size: number;
+}
+
 export interface Note {
   id: string;
   userId: string;
@@ -119,6 +139,10 @@ export interface PersistedRun {
   /** stderr lines claude emitted during a run that still succeeded —
    *  rendered as a collapsed "N warnings" line, never as a failure. */
   warnings?: string[];
+  /** Downloadable deliverables the run produced — diff, files, html, the
+   *  virtual answer. Served by the paired daemon. Optional for back-compat
+   *  with rows persisted before deliverables landed (default undefined). */
+  artifacts?: Artifact[];
   error: string | null;
   /** User text typed after this run — becomes the prompt for the NEXT run. */
   followUp: string;

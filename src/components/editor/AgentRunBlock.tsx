@@ -54,6 +54,8 @@ import { humanizeDispatchError } from "@/lib/dispatch/humanizeError";
 import { ToolCompaction } from "@/components/editor/ToolCompaction";
 import { FileChangesSummary } from "@/components/editor/FileChangesSummary";
 import { RunLinksSummary } from "@/components/editor/RunLinksSummary";
+import { DeliverablesSection } from "@/components/editor/deliverables/DeliverablesSection";
+import type { Artifact } from "@/lib/notes-storage";
 
 export interface ToolCall {
   name: string;
@@ -63,6 +65,9 @@ export interface ToolCall {
 }
 
 export interface AgentRunBlockState {
+  /** The PersistedRun id — used to build artifact download URLs
+   *  (`/run/<runId>/artifact/<id>`). Absent on the in-flight run. */
+  runId?: string;
   status: "running" | "done" | "error";
   /** What was sent to Claude — used to extract a ticket chip. */
   prompt: string;
@@ -82,6 +87,8 @@ export interface AgentRunBlockState {
   toolCalls?: ToolCall[];
   /** Deliverable URLs persisted on the run (cloud backend). */
   links?: string[];
+  /** Downloadable deliverables the run produced — diff, files, html, answer. */
+  artifacts?: Artifact[];
   /** stderr lines from a run that still succeeded. Rendered as a subtle
    *  collapsed "N warnings" one-liner, never with the error treatment. */
   warnings?: string[];
@@ -232,6 +239,12 @@ export function AgentRunBlock({
     ? state.toolCalls
     : state.toolUses.map((name) => ({ name }));
   const hasTools = calls.length > 0;
+
+  // Deliverables the run produced — the primary one leads the collapsed card,
+  // all of them render on expand. Only surfaced on completed runs (they land
+  // with the done event).
+  const artifacts = state.artifacts ?? [];
+  const hasArtifacts = done && artifacts.length > 0;
 
   // Deliverables — files touched + links produced. Rendered in every state
   // (collapsed, expanded, running) so the note's output is always the focus.
@@ -399,7 +412,31 @@ export function AgentRunBlock({
       {done && !bodyOpen ? (
         <Animated.View entering={FadeIn.duration(160)}>
           {deliverables}
-          {summary.length > 0 || hasTools ? (
+          {hasArtifacts ? (
+            <>
+              <DeliverablesSection
+                artifacts={artifacts}
+                runId={state.runId}
+                answerText={answerText}
+                mode="collapsed"
+                onOpenFile={onOpenFile}
+              />
+              {hasTools ? (
+                <View style={{ paddingHorizontal: 14, paddingTop: 8, paddingBottom: 12 }}>
+                  <Text
+                    style={{
+                      fontFamily: "Inter-Medium",
+                      fontSize: 11.5,
+                      color: tertiary,
+                      letterSpacing: -0.1,
+                    }}
+                  >
+                    {`+${calls.length} ${calls.length === 1 ? "tool" : "tools"}`}
+                  </Text>
+                </View>
+              ) : null}
+            </>
+          ) : summary.length > 0 || hasTools ? (
             <View
               style={{
                 paddingHorizontal: 14,
@@ -491,7 +528,7 @@ export function AgentRunBlock({
           {(errored
             ? state.response.length > 0
             : done
-              ? answerText.length > 0
+              ? answerText.length > 0 && !hasArtifacts
               : answerStreaming) ? (
             <View
               style={{
@@ -518,6 +555,18 @@ export function AgentRunBlock({
                 </RNAnimated.Text>
               ) : null}
             </View>
+          ) : null}
+
+          {/* Deliverables in full — every artifact, primary first. Replaces
+              the plain answer markdown above once the run has artifacts. */}
+          {hasArtifacts ? (
+            <DeliverablesSection
+              artifacts={artifacts}
+              runId={state.runId}
+              answerText={answerText}
+              mode="expanded"
+              onOpenFile={onOpenFile}
+            />
           ) : null}
 
           {/* Thinking — interim reasoning, collapsed by default. */}

@@ -872,6 +872,7 @@ export default function HomeScreen() {
             toolUses: [...tools],
             toolCalls: [...toolCalls],
             warnings: warnings.length ? [...warnings] : undefined,
+            artifacts: e.artifacts,
             error: resolvedError,
             followUp: "",
             createdAt: Date.now(),
@@ -2041,6 +2042,7 @@ function AttachmentChip(props: {
 
 function persistedRunToBlockState(run: PersistedRun): AgentRunBlockState {
   return {
+    runId: run.id,
     status: run.status,
     prompt: run.prompt,
     response: run.response,
@@ -2050,6 +2052,7 @@ function persistedRunToBlockState(run: PersistedRun): AgentRunBlockState {
     toolCalls: run.toolCalls,
     links: run.links,
     warnings: run.warnings,
+    artifacts: run.artifacts,
     durationMs: run.durationMs,
     costUsd: run.costUsd,
     error: run.error,
