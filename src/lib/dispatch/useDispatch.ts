@@ -41,6 +41,7 @@ import { getInstallId } from "@/lib/installId";
 import { useSubscriptionStore, canDispatch } from "@/store/subscriptionSlice";
 import { cloudDispatchViaWebSocket } from "@/lib/dispatch/cloudDispatch";
 import { uploadAttachmentToDaemon } from "@/lib/attachments";
+import type { Artifact } from "@/lib/notes-storage";
 
 const TEMPUS_API_URL = (process.env.EXPO_PUBLIC_TEMPUS_API_URL || "").replace(/\/$/, "");
 const TEMPUS_WS_URL = (process.env.EXPO_PUBLIC_TEMPUS_WS_URL || "").replace(/\/$/, "");
@@ -87,6 +88,9 @@ export type DispatchEvent =
        *  same run under a fresh id and the card shows twice. */
       type: "done";
       runId?: string;
+      /** Deliverables the daemon captured for this run, if it reported them
+       *  on the terminal frame. Threaded onto the PersistedRun. */
+      artifacts?: Artifact[];
     };
 
 export interface DispatchArgs {
@@ -253,7 +257,12 @@ export function useDispatch(): UseDispatchResult {
     // we re-attach via GET /run/<runId>/stream?from=<lastSeq> instead of
     // failing a run that's still alive on the Mac. Older daemons never
     // surface a runId, so the resume branch is skipped entirely.
-    const stream = { runId: null as string | null, lastSeq: 0, sawResult: false };
+    const stream = {
+      runId: null as string | null,
+      lastSeq: 0,
+      sawResult: false,
+      artifacts: undefined as Artifact[] | undefined,
+    };
     const handleFrame = (frame: string) => {
       const seq = frameSeq(frame);
       if (seq !== null) {
@@ -264,9 +273,13 @@ export function useDispatch(): UseDispatchResult {
         frame,
         (e) => {
           if (e.type === "result") stream.sawResult = true;
+          if (e.type === "done" && e.artifacts) stream.artifacts = e.artifacts;
           args.onEvent(e);
         },
-        { onRunId: (id) => { stream.runId = id; } },
+        {
+          onRunId: (id) => { stream.runId = id; },
+          onArtifacts: (a) => { stream.artifacts = a; },
+        },
       );
     };
 
@@ -418,7 +431,11 @@ export function useDispatch(): UseDispatchResult {
         });
       }
     } finally {
-      args.onEvent({ type: "done", runId: stream.runId ?? undefined });
+      args.onEvent({
+        type: "done",
+        runId: stream.runId ?? undefined,
+        artifacts: stream.artifacts,
+      });
       setRunning(false);
       useDispatchStore.getState().setRunningNoteId(null);
       if (abortRef.current === controller) abortRef.current = null;
@@ -687,10 +704,36 @@ async function resumeRunStream(ctx: {
  * The spike daemon emits Claude's stream-json events directly inside `data:`,
  * plus a final `event: done` frame. We unwrap to the typed events above.
  */
+function coerceArtifacts(raw: unknown): Artifact[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: Artifact[] = [];
+  for (const a of raw) {
+    if (
+      a &&
+      typeof a.id === "string" &&
+      typeof a.name === "string" &&
+      typeof a.kind === "string" &&
+      typeof a.mime === "string"
+    ) {
+      out.push({
+        id: a.id,
+        name: a.name,
+        kind: a.kind,
+        mime: a.mime,
+        size: typeof a.size === "number" ? a.size : 0,
+      });
+    }
+  }
+  return out.length ? out : undefined;
+}
+
 function parseFrame(
   rawFrame: string,
   onEvent: (e: DispatchEvent) => void,
-  hooks?: { onRunId?: (runId: string) => void },
+  hooks?: {
+    onRunId?: (runId: string) => void;
+    onArtifacts?: (artifacts: Artifact[]) => void;
+  },
 ) {
   const lines = rawFrame.split("\n");
   let eventType = "message";
@@ -721,7 +764,27 @@ function parseFrame(
   }
   if (eventType === "done") {
     // Daemon signals end-of-stream; the outer reader loop will also exit on
-    // EOF, so we don't fire `done` here (the finally block does).
+    // EOF, so we don't fire `done` here (the finally block does). It MAY
+    // carry the captured deliverables — pull them out for the finally block.
+    try {
+      const d = JSON.parse(data);
+      const artifacts = coerceArtifacts(d?.artifacts);
+      if (artifacts) hooks?.onArtifacts?.(artifacts);
+    } catch {
+      // bad done payload — ignore, artifacts stay undefined
+    }
+    return;
+  }
+  if (eventType === "artifacts") {
+    // Dedicated deliverables frame — the daemon may report them separately
+    // from the terminal done signal.
+    try {
+      const d = JSON.parse(data);
+      const artifacts = coerceArtifacts(Array.isArray(d) ? d : d?.artifacts);
+      if (artifacts) hooks?.onArtifacts?.(artifacts);
+    } catch {
+      // bad artifacts payload — ignore
+    }
     return;
   }
   if (eventType === "route") {
@@ -770,6 +833,8 @@ function parseFrame(
   }
 
   if (parsed.type === "result") {
+    const artifacts = coerceArtifacts(parsed.artifacts);
+    if (artifacts) hooks?.onArtifacts?.(artifacts);
     onEvent({
       type: "result",
       sessionId: String(parsed.session_id ?? ""),
