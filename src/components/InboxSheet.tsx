@@ -51,6 +51,8 @@ import {
 import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
 import { useNotesList, type NoteListItem } from "@/lib/notes/useNotesList";
+import { useDispatchQueueStore } from "@/store/dispatchQueueSlice";
+import { QueuedRowTag } from "@/components/editor/QueuedPill";
 import { useAndroidBack } from "@/lib/useAndroidBack";
 import { useSheetDrag } from "@/lib/useSheetDrag";
 
@@ -91,6 +93,7 @@ function InboxSheetMounted({
   useAndroidBack(true, onClose);
   const { tokens } = useTheme();
   const { notes, isLoading } = useNotesList();
+  const queuedNoteIds = useDispatchQueueStore((s) => s.items);
   const [filter, setFilter] = useState<Filter>("all");
 
   const { pan, panelStyle, backdropStyle } = useSheetDrag(onClose);
@@ -341,6 +344,7 @@ function InboxSheetMounted({
                 <NoteCard
                   key={note.id}
                   note={note}
+                  queued={queuedNoteIds.some((it) => it.noteId === note.id)}
                   onPress={() => onSelectNote(note.id)}
                   onLongPress={
                     onLongPressNote
@@ -500,11 +504,13 @@ interface NoteCardTokens {
 
 function NoteCard({
   note,
+  queued,
   onPress,
   onLongPress,
   tokens,
 }: {
   note: NoteListItem;
+  queued?: boolean;
   onPress: () => void;
   onLongPress?: () => void;
   tokens: NoteCardTokens;
@@ -636,6 +642,12 @@ function NoteCard({
                 ) : null}
               </>
             )}
+            {queued ? (
+              <>
+                <Dot color={tokens.tertiaryColor} />
+                <QueuedRowTag />
+              </>
+            ) : null}
           </View>
         </View>
       </View>

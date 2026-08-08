@@ -40,6 +40,8 @@ import { useNotificationsStore } from "@/store/notificationsSlice";
 import { getInstallId } from "@/lib/installId";
 import { useSubscriptionStore, canDispatch } from "@/store/subscriptionSlice";
 import { cloudDispatchViaWebSocket } from "@/lib/dispatch/cloudDispatch";
+import { isNetworkError } from "@/lib/dispatch/postRun";
+import { useDispatchQueueStore } from "@/store/dispatchQueueSlice";
 import { uploadAttachmentToDaemon } from "@/lib/attachments";
 import type { Artifact } from "@/lib/notes-storage";
 
@@ -428,10 +430,21 @@ export function useDispatch(): UseDispatchResult {
       if (controller.signal.aborted) {
         args.onEvent({ type: "error", message: "Cancelled" });
       } else {
-        args.onEvent({
-          type: "error",
-          message: err instanceof Error ? err.message : String(err),
-        });
+        const message = err instanceof Error ? err.message : String(err);
+        // The POST never landed (Mac asleep / offline / unreachable) — park the
+        // dispatch so it fires when the Mac wakes, instead of dropping it behind
+        // a one-shot error. Only unreachability enqueues; an HTTP status the
+        // daemon returned goes through the !res.ok path above and never here.
+        if (args.noteId && isNetworkError(message)) {
+          useDispatchQueueStore.getState().enqueue({
+            noteId: args.noteId,
+            prompt: args.prompt,
+            cwd: args.cwd,
+            sessionId: args.sessionId,
+            noteTitle: args.noteTitle,
+          });
+        }
+        args.onEvent({ type: "error", message });
       }
     } finally {
       args.onEvent({

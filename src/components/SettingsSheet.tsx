@@ -39,6 +39,7 @@ import { Image } from "expo-image";
 import {
   BellRingingIcon,
   CaretRightIcon,
+  CoffeeIcon,
   CrosshairIcon,
   GithubLogoIcon,
   KanbanIcon,
@@ -51,6 +52,7 @@ import {
   XIcon,
   type Icon as PhosphorIcon,
 } from "phosphor-react-native";
+import { fetch as expoFetch } from "expo/fetch";
 import { useAuth, useUser } from "@clerk/clerk-expo";
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
@@ -59,6 +61,7 @@ import { Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
 import { useUiStore, type ThemePreference } from "@/store/uiSlice";
 import { useDaemonStore } from "@/store/daemonSlice";
+import { useResolvedDaemonURL } from "@/lib/dispatch/useResolvedDaemonURL";
 import { useCloudStore } from "@/store/cloudSlice";
 import { cloudEnabled } from "@/config/env";
 import { useSubscriptionStore } from "@/store/subscriptionSlice";
@@ -141,6 +144,60 @@ function SettingsSheetMounted({
   // friendly Mac name; tapping the row opens the scanner again to re-pair.
   const macHost = useDaemonStore((s) => s.host);
   const macConnected = macHost.length > 0;
+
+  // -----------------------------------------------------------------
+  // Keep-awake — the daemon holds an idle-sleep assertion while enabled.
+  // We GET the live state when the sheet opens and POST changes. Mac-only:
+  // the row is hidden when no Mac is paired. `keepAwake === null` means we
+  // haven't loaded yet; the switch stays disabled until then. Toggling is
+  // optimistic and reverts if the POST fails.
+  // -----------------------------------------------------------------
+  const resolvedDaemon = useResolvedDaemonURL();
+  const [keepAwake, setKeepAwake] = useState<boolean | null>(null);
+  const [keepAwakeBusy, setKeepAwakeBusy] = useState(false);
+
+  useEffect(() => {
+    if (!macConnected || !resolvedDaemon.isReady) return;
+    let alive = true;
+    (async () => {
+      try {
+        const target = `${resolvedDaemon.url.replace(/\/$/, "")}/keep-awake?t=${encodeURIComponent(
+          resolvedDaemon.token,
+        )}`;
+        const res = await expoFetch(target, { method: "GET" });
+        if (!res.ok) return;
+        const body = (await res.json()) as { enabled?: boolean };
+        if (alive && typeof body.enabled === "boolean") setKeepAwake(body.enabled);
+      } catch {
+        // best-effort — the row just stays in its loading state
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [macConnected, resolvedDaemon.isReady, resolvedDaemon.url, resolvedDaemon.token]);
+
+  const toggleKeepAwake = useCallback(async () => {
+    if (keepAwake === null || keepAwakeBusy || !resolvedDaemon.isReady) return;
+    const next = !keepAwake;
+    setKeepAwake(next);
+    setKeepAwakeBusy(true);
+    try {
+      const target = `${resolvedDaemon.url.replace(/\/$/, "")}/keep-awake?t=${encodeURIComponent(
+        resolvedDaemon.token,
+      )}`;
+      const res = await expoFetch(target, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      });
+      if (!res.ok) setKeepAwake(!next);
+    } catch {
+      setKeepAwake(!next);
+    } finally {
+      setKeepAwakeBusy(false);
+    }
+  }, [keepAwake, keepAwakeBusy, resolvedDaemon.isReady, resolvedDaemon.url, resolvedDaemon.token]);
 
   // -----------------------------------------------------------------
   // Linear connection state — driven by GET /api/integrations/list.
@@ -790,6 +847,31 @@ function SettingsSheetMounted({
                   tertiaryColor={tertiaryColor}
                   onPress={cycleTheme}
                 />
+                {macConnected ? (
+                  <>
+                    <Divider color={borderColor} />
+                    <Row
+                      Icon={CoffeeIcon}
+                      label="Keep my Mac awake"
+                      subtitle="Prevents your Mac idle-sleeping so notes run while you're away. Closing the lid on battery still sleeps."
+                      subtitleLines={3}
+                      inkColor={inkColor}
+                      subtleColor={subtleColor}
+                      tertiaryColor={tertiaryColor}
+                      trailing={
+                        <Switch
+                          value={keepAwake ?? false}
+                          onValueChange={() => void toggleKeepAwake()}
+                          disabled={keepAwake === null || keepAwakeBusy}
+                          trackColor={{ false: borderColor, true: accent }}
+                          thumbColor={accentOn}
+                        />
+                      }
+                      onPress={() => void toggleKeepAwake()}
+                      hideCaret
+                    />
+                  </>
+                ) : null}
                 <Divider color={borderColor} />
                 <Row
                   Icon={CrosshairIcon}
@@ -1155,6 +1237,8 @@ interface RowProps {
   onPress?: () => void;
   trailing?: React.ReactNode;
   hideCaret?: boolean;
+  /** Lines the subtitle may wrap to. Defaults to 1 (single-line rows). */
+  subtitleLines?: number;
 }
 
 function Row({
@@ -1167,6 +1251,7 @@ function Row({
   onPress,
   trailing,
   hideCaret,
+  subtitleLines = 1,
 }: RowProps) {
   // Pattern: Pressable WRAPS content. Function-style only carries `opacity`
   // (single non-layout prop, safe with cssInterop). All visual + layout lives
@@ -1218,7 +1303,7 @@ function Row({
               lineHeight: 16,
               marginTop: 1,
             }}
-            numberOfLines={1}
+            numberOfLines={subtitleLines}
           >
             {subtitle}
           </Text>
