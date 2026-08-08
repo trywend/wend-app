@@ -27,14 +27,9 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import {
-  ArrowUpIcon,
-  CaretLeftIcon,
-  CircleNotchIcon,
-  StopIcon,
-} from "phosphor-react-native";
+import { ArrowUpIcon, CaretLeftIcon, StopIcon } from "phosphor-react-native";
 
-import { Text } from "@/components/primitives";
+import { Text, Spinner } from "@/components/primitives";
 import { Markdown } from "@/components/editor/Markdown";
 import { parseMarkdown } from "@/lib/agentMarkdown";
 import { useTheme } from "@/theme/ThemeProvider";
@@ -46,6 +41,7 @@ import {
   projectFromCwd,
   type SessionMessage,
 } from "@/lib/sessions/api";
+import { useSessionsCache, cachedTranscript } from "@/store/sessionsCacheSlice";
 
 interface Streaming {
   text: string;
@@ -68,12 +64,21 @@ export default function SessionConversationScreen() {
   const daemon = useResolvedDaemonURL();
   const { dispatch, running, cancel } = useDispatch();
 
-  const [messages, setMessages] = useState<SessionMessage[]>([]);
-  const [cwd, setCwd] = useState<string>(params.cwd ?? "");
-  const [project, setProject] = useState<string>(
-    params.project ?? (params.cwd ? projectFromCwd(params.cwd) : ""),
+  const cached = cachedTranscript(sessionId);
+  const setTranscript = useSessionsCache((s) => s.setTranscript);
+
+  const [messages, setMessages] = useState<SessionMessage[]>(
+    cached?.messages ?? [],
   );
-  const [loading, setLoading] = useState(true);
+  const [cwd, setCwd] = useState<string>(
+    params.cwd ?? cached?.cwd ?? "",
+  );
+  const [project, setProject] = useState<string>(
+    params.project ??
+      cached?.project ??
+      (params.cwd ? projectFromCwd(params.cwd) : ""),
+  );
+  const [loading, setLoading] = useState(!cached);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [streaming, setStreaming] = useState<Streaming | null>(null);
@@ -100,13 +105,16 @@ export default function SessionConversationScreen() {
       setMessages(detail.messages);
       if (detail.cwd) setCwd(detail.cwd);
       if (detail.project) setProject(detail.project);
+      setTranscript(sessionId, detail);
       setLoadError(null);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : String(err));
+      if (!cachedTranscript(sessionId)) {
+        setLoadError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
       setLoading(false);
     }
-  }, [daemon.isReady, daemon.url, daemon.token, sessionId]);
+  }, [daemon.isReady, daemon.url, daemon.token, sessionId, setTranscript]);
 
   useEffect(() => {
     void loadSession();
@@ -247,7 +255,7 @@ export default function SessionConversationScreen() {
         >
           {loading ? (
             <View style={{ paddingVertical: 48, alignItems: "center" }}>
-              <CircleNotchIcon size={20} color={subtle} weight="bold" />
+              <Spinner size={20} color={subtle} />
             </View>
           ) : loadError ? (
             <View style={{ paddingVertical: 32, alignItems: "center" }}>

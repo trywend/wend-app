@@ -17,7 +17,7 @@ export interface SessionSummary {
   project: string;
   title: string;
   lastModified: number;
-  messageCount: number;
+  messageCount?: number;
   gitBranch?: string;
 }
 

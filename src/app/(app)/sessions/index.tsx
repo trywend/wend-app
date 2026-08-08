@@ -14,9 +14,9 @@
 import { useRouter } from "expo-router";
 import { FlatList, Pressable, RefreshControl, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { CaretLeftIcon, CircleNotchIcon } from "phosphor-react-native";
+import { CaretLeftIcon } from "phosphor-react-native";
 
-import { Text } from "@/components/primitives";
+import { Text, Spinner } from "@/components/primitives";
 import { HealthDot } from "@/components/HealthDot";
 import { useTheme } from "@/theme/ThemeProvider";
 import { useSessions } from "@/lib/sessions/useSessions";
@@ -77,7 +77,7 @@ export default function SessionsScreen() {
 
       {status === "loading" ? (
         <CenteredState>
-          <CircleNotchIcon size={22} color={subtle} weight="bold" />
+          <Spinner size={22} color={subtle} />
           <Text variant="meta" style={{ color: subtle, marginTop: 10 }}>
             Loading sessions…
           </Text>
@@ -161,9 +161,11 @@ function SessionRow({
   accent: string;
   onPress: () => void;
 }) {
-  const meta = `${formatSessionTime(session.lastModified)} · ${session.messageCount} ${
-    session.messageCount === 1 ? "message" : "messages"
-  }`;
+  const count = session.messageCount;
+  const hasCount = typeof count === "number" && count > 0;
+  const meta = hasCount
+    ? `${formatSessionTime(session.lastModified)} · ${count} ${count === 1 ? "message" : "messages"}`
+    : formatSessionTime(session.lastModified);
   return (
     <Pressable
       onPress={onPress}
