@@ -4,7 +4,7 @@
  * fetched from the artifact URL.
  */
 import { useMemo } from "react";
-import { ActivityIndicator, ScrollView, View } from "react-native";
+import { ScrollView, View } from "react-native";
 import { GitDiffIcon } from "phosphor-react-native";
 
 import { Text } from "@/components/primitives";
@@ -12,6 +12,7 @@ import { useTheme } from "@/theme/ThemeProvider";
 import type { Artifact } from "@/lib/notes-storage";
 import { DeliverableCard, DownloadButton } from "./DownloadButton";
 import { downloadText, downloadFromUrl } from "./download";
+import { Spinner } from "./Spinner";
 import { useArtifactText, useArtifactSource } from "./useArtifact";
 
 type LineKind = "add" | "del" | "hunk" | "file" | "meta" | "context";
@@ -117,7 +118,7 @@ export function DiffDeliverable({
           }}
         >
           {state.phase === "loading" ? (
-            <ActivityIndicator size="small" color={subtle} />
+            <Spinner size={14} color={subtle} />
           ) : null}
           <Text
             style={{
@@ -142,7 +143,7 @@ export function DiffDeliverable({
     >
       {state.phase === "loading" ? (
         <View style={{ padding: 20, alignItems: "center" }}>
-          <ActivityIndicator size="small" color={subtle} />
+          <Spinner size={16} color={subtle} />
         </View>
       ) : state.phase === "ready" ? (
         <ScrollView
@@ -161,21 +162,25 @@ export function DiffDeliverable({
           <Text style={{ fontFamily: "Inter-Regular", fontSize: 13, color: tertiary }}>
             {state.phase === "unavailable"
               ? "Pair your Mac to load this patch. You can still download it."
-              : "Couldn't load this patch from your Mac."}
+              : state.phase === "gone"
+                ? "This patch is no longer on your Mac."
+                : "Couldn't load this patch from your Mac."}
           </Text>
         </View>
       )}
-      <View
-        style={{
-          paddingHorizontal: 12,
-          paddingVertical: 12,
-          borderTopWidth: 1,
-          borderTopColor: border,
-          flexDirection: "row",
-        }}
-      >
-        <DownloadButton label="Download .diff" onDownload={save} />
-      </View>
+      {state.phase === "gone" ? null : (
+        <View
+          style={{
+            paddingHorizontal: 12,
+            paddingVertical: 12,
+            borderTopWidth: 1,
+            borderTopColor: border,
+            flexDirection: "row",
+          }}
+        >
+          <DownloadButton label="Download .diff" onDownload={save} />
+        </View>
+      )}
     </DeliverableCard>
   );
 }

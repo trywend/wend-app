@@ -28,6 +28,7 @@ export type ArtifactTextState =
   | { phase: "unavailable" }
   | { phase: "loading" }
   | { phase: "ready"; text: string }
+  | { phase: "gone" }
   | { phase: "error" };
 
 /** Resolved daemon creds + a ready-made URL builder for a given run. */
@@ -73,6 +74,10 @@ export function useArtifactText(
           buildArtifactURL(base, r.token, runId, artifactId),
         );
         if (!alive) return;
+        if (res.status === 404 || res.status === 410) {
+          setState({ phase: "gone" });
+          return;
+        }
         if (!res.ok) {
           setState({ phase: "error" });
           return;

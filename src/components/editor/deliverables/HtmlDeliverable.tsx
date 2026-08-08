@@ -22,6 +22,7 @@ import { useTheme } from "@/theme/ThemeProvider";
 import type { Artifact } from "@/lib/notes-storage";
 import { DeliverableCard, DownloadButton } from "./DownloadButton";
 import { downloadText, downloadFromUrl } from "./download";
+import { Spinner } from "./Spinner";
 import { useArtifactText, useArtifactSource } from "./useArtifact";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -115,7 +116,11 @@ export function HtmlDeliverable({
     return (
       <DeliverableCard icon={icon} title={name} chip="HTML">
         <View style={{ height: 120, backgroundColor: canvas }}>
-          {state.phase === "ready" && webViewAvailable ? (
+          {state.phase === "loading" ? (
+            <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+              <Spinner size={16} color={subtle} />
+            </View>
+          ) : state.phase === "ready" && webViewAvailable ? (
             <View pointerEvents="none" style={{ flex: 1 }}>
               <Sandbox html={state.text} style={{ flex: 1, backgroundColor: canvas }} />
             </View>
@@ -125,7 +130,11 @@ export function HtmlDeliverable({
                 numberOfLines={3}
                 style={{ fontFamily: "Inter-Regular", fontSize: 13, color: subtle, lineHeight: 19 }}
               >
-                {state.phase === "ready" ? stripHtml(state.text) : "HTML document"}
+                {state.phase === "ready"
+                  ? stripHtml(state.text)
+                  : state.phase === "gone"
+                    ? "No longer on your Mac"
+                    : "HTML document"}
               </Text>
             </View>
           )}
@@ -139,7 +148,9 @@ export function HtmlDeliverable({
       <DeliverableCard icon={icon} title={name} chip="HTML">
         <View style={{ height: INLINE_HEIGHT, backgroundColor: canvas }}>
           {state.phase === "loading" ? (
-            <View style={{ flex: 1 }} />
+            <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+              <Spinner size={16} color={subtle} />
+            </View>
           ) : state.phase === "ready" && webViewAvailable ? (
             <Sandbox html={state.text} style={{ flex: 1, backgroundColor: canvas }} />
           ) : state.phase === "ready" ? (
@@ -153,11 +164,14 @@ export function HtmlDeliverable({
               <Text style={{ fontFamily: "Inter-Regular", fontSize: 13, color: tertiary }}>
                 {state.phase === "unavailable"
                   ? "Pair your Mac to render this page. You can still download it."
-                  : "Couldn't load this page from your Mac."}
+                  : state.phase === "gone"
+                    ? "This page is no longer on your Mac."
+                    : "Couldn't load this page from your Mac."}
               </Text>
             </View>
           )}
         </View>
+        {state.phase === "gone" ? null : (
         <View
           style={{
             paddingHorizontal: 12,
@@ -194,6 +208,7 @@ export function HtmlDeliverable({
           ) : null}
           <DownloadButton label="Download .html" onDownload={save} />
         </View>
+        )}
       </DeliverableCard>
 
       {full && state.phase === "ready" && webViewAvailable ? (

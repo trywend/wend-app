@@ -1,7 +1,7 @@
 /**
  * Wend — deliverables section. Routes each run artifact to its renderer and, in
  * the collapsed card, leads with the single PRIMARY deliverable rendered
- * compactly. Priority: html > diff > file/image > answer.
+ * compactly. Priority: html > diff > image > file > answer.
  *
  *   - collapsed → the primary artifact only, compact preview.
  *   - expanded  → every artifact in full, primary first.
@@ -15,7 +15,7 @@ import { DiffDeliverable } from "./DiffDeliverable";
 import { FileDeliverable } from "./FileDeliverable";
 import { HtmlDeliverable } from "./HtmlDeliverable";
 
-const PRIORITY: ArtifactKind[] = ["html", "diff", "file", "image", "answer"];
+const PRIORITY: ArtifactKind[] = ["html", "diff", "image", "file", "answer"];
 
 function rank(kind: ArtifactKind): number {
   const i = PRIORITY.indexOf(kind);

@@ -65,9 +65,14 @@ export async function downloadFromUrl(args: {
     await Linking.openURL(url).catch(() => {});
     return;
   }
-  const res = await Blob.config({ fileCache: true }).fetch("GET", url);
-  const path: string = res.path();
-  await present(`file://${path}`, mime, name);
+  const path = `${Blob.fs.dirs.CacheDir}/${sanitizeName(name)}`;
+  const res = await Blob.config({ path }).fetch("GET", url);
+  const status: number = res.info?.().status ?? 200;
+  if (status < 200 || status >= 300) {
+    await Blob.fs.unlink(res.path()).catch(() => {});
+    throw new Error(`download failed: ${status}`);
+  }
+  await present(`file://${res.path()}`, mime, name);
 }
 
 /** Save in-memory text (the virtual answer) to a cache file and present the
