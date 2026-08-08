@@ -848,7 +848,9 @@ export default function HomeScreen() {
             ? "error"
             : "done";
           const persisted: PersistedRun = {
-            id: Crypto.randomUUID(),
+            // Prefer the daemon's own run id so a later /note/<id> hydration
+            // dedupes against this run instead of appending a twin.
+            id: e.runId || Crypto.randomUUID(),
             prompt,
             response: accumulated,
             reasoning: joinReasoning(),

@@ -80,7 +80,14 @@ export type DispatchEvent =
       type: "reconnecting";
     }
   | { type: "error"; message: string }
-  | { type: "done" };
+  | {
+      /** Stream finished. On the Mac route this carries the daemon's own
+       *  run id so the persisted run shares the id the daemon stored it
+       *  under — otherwise a later /note/<id> hydration re-appends the
+       *  same run under a fresh id and the card shows twice. */
+      type: "done";
+      runId?: string;
+    };
 
 export interface DispatchArgs {
   prompt: string;
@@ -411,7 +418,7 @@ export function useDispatch(): UseDispatchResult {
         });
       }
     } finally {
-      args.onEvent({ type: "done" });
+      args.onEvent({ type: "done", runId: stream.runId ?? undefined });
       setRunning(false);
       useDispatchStore.getState().setRunningNoteId(null);
       if (abortRef.current === controller) abortRef.current = null;
