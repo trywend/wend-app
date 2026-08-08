@@ -55,6 +55,7 @@ import { ToolCompaction } from "@/components/editor/ToolCompaction";
 import { FileChangesSummary } from "@/components/editor/FileChangesSummary";
 import { RunLinksSummary } from "@/components/editor/RunLinksSummary";
 import { DeliverablesSection } from "@/components/editor/deliverables/DeliverablesSection";
+import { resolveAnswerText } from "@/components/editor/deliverables/answerText";
 import type { Artifact } from "@/lib/notes-storage";
 
 export interface ToolCall {
@@ -133,9 +134,12 @@ export function AgentRunBlock({
 
   // The final deliverable text is what the note produced — shown as the run's
   // output. `reasoning` is the interim thinking, hidden by default. Old rows
-  // and cross-device catch-up carry only `response`; fall back to it as the
-  // answer so nothing is lost.
-  const answerText = state.answer ?? state.response;
+  // and cross-device catch-up carry only `response`; when `answer` is absent we
+  // strip the tool-reading preamble off `response` rather than echo it whole.
+  const answerText = useMemo(
+    () => resolveAnswerText(state.answer, state.response),
+    [state.answer, state.response],
+  );
   const reasoningText = state.reasoning ?? "";
   const hasReasoning = reasoningText.trim().length > 0;
 
@@ -248,6 +252,10 @@ export function AgentRunBlock({
   // with the done event).
   const artifacts = state.artifacts ?? [];
   const hasArtifacts = done && artifacts.length > 0;
+  // A downloadable answer.md card is only warranted when the daemon judged the
+  // output substantial enough to emit an `answer` artifact. A concise answer
+  // has none — it renders as plain inline text instead of a file card.
+  const hasAnswerArtifact = done && artifacts.some((a) => a.kind === "answer");
 
   // Deliverables — files touched + links produced. Rendered in every state
   // (collapsed, expanded, running) so the note's output is always the focus.
@@ -531,7 +539,7 @@ export function AgentRunBlock({
           {(errored
             ? state.response.length > 0
             : done
-              ? answerText.length > 0 && !hasArtifacts
+              ? answerText.length > 0 && !hasAnswerArtifact
               : answerStreaming) ? (
             <View
               style={{
