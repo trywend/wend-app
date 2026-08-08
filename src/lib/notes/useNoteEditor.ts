@@ -26,6 +26,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AppState } from "react-native";
 import { useAuthStore } from "@/store/authSlice";
 import { useNotesCache } from "@/store/notesCacheSlice";
 import {
@@ -59,6 +60,9 @@ export interface UseNoteEditorResult {
   lastSavedAt: number | null;
   /** Empty string until the load completes. */
   noteId: string;
+  /** Persist any pending edits right now, bypassing the debounce. No-ops when
+   *  nothing is pending. Safe to call redundantly. */
+  flush: () => Promise<void>;
 }
 
 export function useNoteEditor(noteId?: string): UseNoteEditorResult {
@@ -357,6 +361,24 @@ export function useNoteEditor(noteId?: string): UseNoteEditorResult {
     };
   }, [flush]);
 
+  /* ------------------------------------------------------------------- */
+  /* Background flush — the app doesn't unmount when the user leaves it,   */
+  /* so a fast close would otherwise strand the last <400ms of typing in   */
+  /* the pending debounce. Write it now, before JS suspends.               */
+  /* ------------------------------------------------------------------- */
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "background" || state === "inactive") {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+        void flush();
+      }
+    });
+    return () => sub.remove();
+  }, [flush]);
+
   return {
     title,
     body,
@@ -372,5 +394,6 @@ export function useNoteEditor(noteId?: string): UseNoteEditorResult {
     isDirty,
     lastSavedAt,
     noteId: resolvedId,
+    flush,
   };
 }
