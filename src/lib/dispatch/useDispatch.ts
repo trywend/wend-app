@@ -54,6 +54,9 @@ export type DispatchEvent =
       sessionId: string;
       durationMs: number;
       costUsd: number;
+      /** Total tokens for the run (input + output + cache), from the result
+       *  frame's `usage`. Shown in place of cost. */
+      tokens: number;
       isError: boolean;
     }
   | {
@@ -840,6 +843,7 @@ function parseFrame(
       sessionId: String(parsed.session_id ?? ""),
       durationMs: Number(parsed.duration_ms ?? 0),
       costUsd: Number(parsed.total_cost_usd ?? 0),
+      tokens: sumUsageTokens(parsed.usage),
       isError: Boolean(parsed.is_error),
     });
     return;
@@ -847,4 +851,16 @@ function parseFrame(
 
   // system / user / tool_result frames: we ignore for now. The result frame
   // is what closes the run; intermediate types are just protocol scaffolding.
+}
+
+function sumUsageTokens(usage: unknown): number {
+  if (!usage || typeof usage !== "object") return 0;
+  const u = usage as Record<string, unknown>;
+  const n = (k: string) => (typeof u[k] === "number" ? (u[k] as number) : 0);
+  return (
+    n("input_tokens") +
+    n("output_tokens") +
+    n("cache_creation_input_tokens") +
+    n("cache_read_input_tokens")
+  );
 }

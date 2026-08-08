@@ -160,6 +160,8 @@ interface InflightRun {
   sessionId: string | null;
   durationMs: number;
   costUsd: number;
+  /** Total tokens (input + output + cache) for the run. Shown instead of cost. */
+  tokens: number;
   status: "running" | "done" | "error";
   error: string | null;
   /** stderr lines accumulated during the run. Warnings, not failures. */
@@ -652,6 +654,7 @@ export default function HomeScreen() {
         sessionId: null,
         durationMs: 0,
         costUsd: 0,
+        tokens: 0,
         routeName: null,
         routeCwd: null,
         routeSource: null,
@@ -718,6 +721,7 @@ export default function HomeScreen() {
       sessionId,
       durationMs: 0,
       costUsd: 0,
+      tokens: 0,
       status: "running",
       error: null,
       warnings: [],
@@ -740,6 +744,7 @@ export default function HomeScreen() {
     let resolvedSessionId: string | null = sessionId;
     let resolvedDuration = 0;
     let resolvedCost = 0;
+    let resolvedTokens = 0;
     let resolvedError: string | null = null;
     let didError = false;
 
@@ -829,6 +834,7 @@ export default function HomeScreen() {
           resolvedSessionId = e.sessionId || resolvedSessionId;
           resolvedDuration = e.durationMs;
           resolvedCost = e.costUsd;
+          resolvedTokens = e.tokens;
           if (e.isError) {
             didError = true;
             resolvedError =
@@ -841,6 +847,7 @@ export default function HomeScreen() {
                   sessionId: resolvedSessionId,
                   durationMs: resolvedDuration,
                   costUsd: resolvedCost,
+                  tokens: resolvedTokens,
                   status: e.isError ? "error" : "done",
                   error: e.isError ? resolvedError : null,
                 }
@@ -872,6 +879,7 @@ export default function HomeScreen() {
             status: finalStatus,
             durationMs: resolvedDuration,
             costUsd: resolvedCost,
+            tokens: resolvedTokens,
             toolUses: [...tools],
             toolCalls: [...toolCalls],
             warnings: warnings.length ? [...warnings] : undefined,
@@ -2063,6 +2071,7 @@ function persistedRunToBlockState(run: PersistedRun): AgentRunBlockState {
     artifacts: run.artifacts,
     durationMs: run.durationMs,
     costUsd: run.costUsd,
+    tokens: run.tokens,
     error: run.error,
   };
 }
@@ -2079,6 +2088,7 @@ function inflightToBlockState(run: InflightRun): AgentRunBlockState {
     warnings: run.warnings,
     durationMs: run.durationMs,
     costUsd: run.costUsd,
+    tokens: run.tokens,
     error: run.error,
   };
 }

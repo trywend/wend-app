@@ -225,11 +225,23 @@ function parseClaudeFrame(data: string, onEvent: (e: DispatchEvent) => void): vo
       }
     }
   } else if (o.type === "result") {
+    const sumUsage = (usage: unknown): number => {
+      if (!usage || typeof usage !== "object") return 0;
+      const u = usage as Record<string, unknown>;
+      const n = (k: string) => (typeof u[k] === "number" ? (u[k] as number) : 0);
+      return (
+        n("input_tokens") +
+        n("output_tokens") +
+        n("cache_creation_input_tokens") +
+        n("cache_read_input_tokens")
+      );
+    };
     onEvent({
       type: "result",
       sessionId: String(o.session_id ?? ""),
       durationMs: Number(o.duration_ms ?? 0),
       costUsd: Number(o.total_cost_usd ?? 0),
+      tokens: sumUsage(o.usage),
       isError: Boolean(o.is_error),
     });
   }

@@ -94,6 +94,9 @@ export interface AgentRunBlockState {
   warnings?: string[];
   durationMs: number;
   costUsd: number;
+  /** Total tokens (input + output + cache). Shown in the header instead of
+   *  cost. Absent on old rows → header shows duration only. */
+  tokens?: number;
   error: string | null;
 }
 
@@ -363,8 +366,8 @@ export function AgentRunBlock({
             </Text>
           ) : null}
 
-          {/* Done: cost/duration in header, then caret. */}
-          {done && (state.durationMs > 0 || state.costUsd > 0) ? (
+          {/* Done: tokens/duration in header, then caret. */}
+          {done && (state.durationMs > 0 || (state.tokens ?? 0) > 0) ? (
             <Text
               style={{
                 fontFamily: "JetBrainsMono",
@@ -373,7 +376,7 @@ export function AgentRunBlock({
               }}
             >
               {formatDuration(state.durationMs)}
-              {state.costUsd > 0 ? ` · $${state.costUsd.toFixed(3)}` : ""}
+              {(state.tokens ?? 0) > 0 ? ` · ${formatTokens(state.tokens!)}` : ""}
             </Text>
           ) : null}
           {done ? (
@@ -534,7 +537,7 @@ export function AgentRunBlock({
               style={{
                 paddingHorizontal: 14,
                 paddingTop: 14,
-                paddingBottom: errored || (done && state.costUsd === 0 && state.durationMs === 0) ? 14 : 6,
+                paddingBottom: errored || (done && (state.tokens ?? 0) === 0 && state.durationMs === 0) ? 14 : 6,
               }}
             >
               <Markdown
@@ -898,6 +901,16 @@ function Dot({ color }: { color: string }) {
       }}
     />
   );
+}
+
+function formatTokens(n: number): string {
+  if (n < 1000) return `${n} tok`;
+  if (n < 1_000_000) {
+    const k = n / 1000;
+    return `${k >= 100 ? Math.round(k) : k.toFixed(1).replace(/\.0$/, "")}k tok`;
+  }
+  const m = n / 1_000_000;
+  return `${m.toFixed(1).replace(/\.0$/, "")}M tok`;
 }
 
 function formatDuration(ms: number): string {

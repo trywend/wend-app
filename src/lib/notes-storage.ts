@@ -129,6 +129,9 @@ export interface PersistedRun {
   status: "done" | "error";
   durationMs: number;
   costUsd: number;
+  /** Total tokens (input + output + cache) for the run. Shown instead of
+   *  cost. Optional for back-compat with rows persisted before it landed. */
+  tokens?: number;
   toolUses: string[];
   /** Richer per-call records (name + input) when captured. Optional for
    *  back-compat with rows persisted before the structured shape landed. */
