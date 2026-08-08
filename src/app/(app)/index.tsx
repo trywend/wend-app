@@ -29,6 +29,7 @@
  * only for static, non-layout properties.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "expo-router";
 import {
   AccessibilityInfo,
   Alert,
@@ -59,6 +60,7 @@ import {
   MagnifyingGlassIcon,
   PaperclipIcon,
   QuotesIcon,
+  StackIcon,
   StopIcon,
   TextBIcon,
   TextHOneIcon,
@@ -176,6 +178,7 @@ const INITIAL_INFLIGHT: InflightRun | null = null;
 
 export default function HomeScreen() {
   const { tokens } = useTheme();
+  const router = useRouter();
   // currentNoteId switches which note the editor shows. `undefined` means
   // "load the most recent draft" (loadOrCreateDraftNote). Tapping a card in
   // the inbox sets this; the FAB creates a new note and sets it here.
@@ -1112,6 +1115,11 @@ export default function HomeScreen() {
                 }
                 accessibilityLabel="Search"
                 onPress={() => setCommandPaletteOpen(true)}
+              />
+              <IconButton
+                icon={<StackIcon size={22} color={subtleColor} weight="regular" />}
+                accessibilityLabel="Sessions"
+                onPress={() => router.push("/(app)/sessions")}
               />
             </View>
             <View
