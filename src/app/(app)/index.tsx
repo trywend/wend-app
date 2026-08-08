@@ -33,6 +33,7 @@ import { useRouter } from "expo-router";
 import {
   AccessibilityInfo,
   Alert,
+  AppState,
   Image as RNImage,
   Keyboard,
   KeyboardAvoidingView,
@@ -199,6 +200,7 @@ export default function HomeScreen() {
     updateRunFollowUp,
     removeRun,
     noteId: resolvedNoteId,
+    flush: flushNote,
   } = useNoteEditor(currentNoteId);
   const { refresh: refreshNotes } = useNotesList();
   const userId = useAuthStore((s) => s.user?.id);
@@ -478,6 +480,24 @@ export default function HomeScreen() {
     runs,
   });
   const showArmBar = arming.phase === "armed" && !isStreaming;
+
+  // Backgrounding suspends JS, killing the in-flight settle/countdown before it
+  // can fire. On the way out we persist pending edits first, then commit the
+  // dispatch synchronously if the target passes the gate — the daemon runs it
+  // to completion whether or not the app survives.
+  const flushNoteRef = useRef(flushNote);
+  flushNoteRef.current = flushNote;
+  const flushFireRef = useRef(arming.flushFireIfArmed);
+  flushFireRef.current = arming.flushFireIfArmed;
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "background" || state === "inactive") {
+        void flushNoteRef.current();
+        flushFireRef.current();
+      }
+    });
+    return () => sub.remove();
+  }, []);
   const armTicket = isFirstSend
     ? dispatchSignal
     : extractDispatchSignal("", lastFollowUp);
