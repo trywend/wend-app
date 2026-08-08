@@ -98,6 +98,7 @@ import { catchUpRunsForNote } from "@/lib/dispatch/catchUp";
 import {
   catchUpMacRunsForNote,
   hydrateNotesFromMac,
+  dedupeAllNoteRuns,
 } from "@/lib/dispatch/catchUpMac";
 import {
   findEditNewStringForPath,
@@ -356,6 +357,15 @@ export default function HomeScreen() {
     resolvedDaemon.token,
     userId,
   ]);
+
+  // Self-heal any twin runs left by the old id-mismatch bug. Runs on inbox
+  // open regardless of daemon reachability; idempotent and cheap.
+  useEffect(() => {
+    if (!inboxOpen || !userId) return;
+    void dedupeAllNoteRuns(userId).then((removed) => {
+      if (removed > 0) void refreshNotes();
+    });
+  }, [inboxOpen, userId, refreshNotes]);
 
   const bodyRef = useRef<LiveMarkdownInputRef>(null);
   const followUpRefs = useRef<Record<number, TextInput | null>>({});
