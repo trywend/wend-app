@@ -1,6 +1,6 @@
 /**
- * SCREEN: Sessions — every Claude Code session on the paired Mac, newest
- * first. Not just Wend notes: terminal sessions too, read from
+ * SCREEN: Sessions — every Claude Code session on the paired Mac, grouped by
+ * project, newest first. Not just Wend notes: terminal sessions too, read from
  * ~/.claude/projects via the daemon's GET /sessions.
  *
  * Tapping a row opens the conversation view, where the user can resume and
@@ -10,13 +10,21 @@
  *
  * The list renders instantly from the SWR cache (useSessions) and refreshes
  * in the background. A slim search bar filters the cached list locally by
- * project + title as you type.
+ * project + title as you type; searching suspends grouping and flattens to a
+ * flat recency list with the project restored on each row's meta line.
  *
  * NativeWind gotcha: every Pressable here with a function `style` keeps
  * layout inline; className carries non-layout only.
  */
 import { useDeferredValue, useMemo, useState } from "react";
-import { FlatList, Pressable, RefreshControl, TextInput, View } from "react-native";
+import {
+  FlatList,
+  Pressable,
+  RefreshControl,
+  SectionList,
+  TextInput,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import {
@@ -31,6 +39,13 @@ import { useTheme } from "@/theme/ThemeProvider";
 import { typography } from "@/theme/tokens";
 import { useSessions } from "@/lib/sessions/useSessions";
 import { formatSessionTime, type SessionSummary } from "@/lib/sessions/api";
+import {
+  classifyBranch,
+  groupByProject,
+  resolveIdentity,
+} from "@/lib/sessions/grouping";
+
+const MONO = "JetBrainsMono";
 
 export default function SessionsScreen() {
   const { tokens } = useTheme();
@@ -56,6 +71,8 @@ export default function SessionsScreen() {
     );
   }, [sessions, deferredQuery]);
 
+  const sections = useMemo(() => groupByProject(sessions), [sessions]);
+
   const searching = query.trim().length > 0;
   const showSearch = status === "ready" && sessions.length > 0;
 
@@ -69,6 +86,15 @@ export default function SessionsScreen() {
       params: { id: s.id, cwd: s.cwd, project: s.project, title: s.title },
     });
   }
+
+  const refreshControl = (
+    <RefreshControl
+      refreshing={refreshing}
+      onRefresh={refresh}
+      tintColor={subtle}
+      colors={[accent]}
+    />
+  );
 
   return (
     <SafeAreaView
@@ -117,6 +143,7 @@ export default function SessionsScreen() {
           tertiary={tertiary}
           border={border}
           chip={chip}
+          accent={accent}
           caret={tokens["accent-caret"]}
           placeholder={tokens["text-placeholder"]}
         />
@@ -133,7 +160,7 @@ export default function SessionsScreen() {
         <CenteredState>
           <Text
             variant="meta"
-            style={{ color: subtle, textAlign: "center", maxWidth: 260 }}
+            style={{ color: subtle, textAlign: "center", maxWidth: 280 }}
           >
             Pair your Mac to see its Claude Code sessions here.
           </Text>
@@ -162,43 +189,86 @@ export default function SessionsScreen() {
         <CenteredState>
           <Text
             variant="meta"
-            style={{ color: subtle, textAlign: "center", maxWidth: 260 }}
+            style={{ color: subtle, textAlign: "center", maxWidth: 280 }}
           >
             No Claude Code sessions on this Mac yet.
           </Text>
+          <Text
+            variant="caption"
+            style={{
+              color: tertiary,
+              textAlign: "center",
+              maxWidth: 280,
+              marginTop: 8,
+            }}
+          >
+            Run{" "}
+            <Text
+              variant="caption"
+              style={{ fontFamily: MONO, color: tertiary }}
+            >
+              claude
+            </Text>{" "}
+            in a terminal, or Wend a note.
+          </Text>
         </CenteredState>
-      ) : filtered.length === 0 ? (
+      ) : searching && filtered.length === 0 ? (
         <CenteredState>
           <Text
             variant="meta"
-            style={{ color: subtle, textAlign: "center", maxWidth: 260 }}
+            style={{ color: subtle, textAlign: "center", maxWidth: 280 }}
           >
             No sessions match “{query.trim()}”.
           </Text>
         </CenteredState>
-      ) : (
+      ) : searching ? (
         <FlatList
           data={filtered}
           keyExtractor={(s) => s.id}
-          contentContainerStyle={{ paddingVertical: 6 }}
+          contentContainerStyle={{ paddingTop: 4, paddingBottom: 24 }}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={refresh}
-              tintColor={subtle}
-              colors={[accent]}
-            />
-          }
-          renderItem={({ item, index }) => (
+          refreshControl={refreshControl}
+          renderItem={({ item }) => (
             <SessionRow
               session={item}
-              active={!searching && index === 0}
+              searching
               ink={ink}
               subtle={subtle}
               tertiary={tertiary}
-              border={border}
+              chip={chip}
+              accent={accent}
+              onPress={() => openSession(item)}
+            />
+          )}
+        />
+      ) : (
+        <SectionList
+          sections={sections}
+          keyExtractor={(s) => s.id}
+          stickySectionHeadersEnabled
+          contentContainerStyle={{ paddingTop: 4, paddingBottom: 24 }}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          refreshControl={refreshControl}
+          renderSectionHeader={({ section }) => (
+            <SectionHeader
+              project={section.project}
+              count={section.data.length}
+              first={section.index === 0}
+              canvas={canvas}
+              subtle={subtle}
+              tertiary={tertiary}
+              chip={chip}
+            />
+          )}
+          renderItem={({ item }) => (
+            <SessionRow
+              session={item}
+              searching={false}
+              ink={ink}
+              subtle={subtle}
+              tertiary={tertiary}
               chip={chip}
               accent={accent}
               onPress={() => openSession(item)}
@@ -207,6 +277,219 @@ export default function SessionsScreen() {
         />
       )}
     </SafeAreaView>
+  );
+}
+
+function SectionHeader({
+  project,
+  count,
+  first,
+  canvas,
+  subtle,
+  tertiary,
+  chip,
+}: {
+  project: string;
+  count: number;
+  first: boolean;
+  canvas: string;
+  subtle: string;
+  tertiary: string;
+  chip: string;
+}) {
+  return (
+    <View
+      accessibilityRole="header"
+      accessibilityLabel={count >= 2 ? `${project}, ${count} sessions` : project}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        height: 34,
+        paddingLeft: 22,
+        paddingRight: 22,
+        marginTop: first ? 0 : 10,
+        backgroundColor: canvas,
+      }}
+    >
+      <Text
+        variant="mono-inline"
+        numberOfLines={1}
+        style={{ color: subtle, flexShrink: 1 }}
+      >
+        {project}
+      </Text>
+      {count >= 2 ? (
+        <View
+          style={{
+            marginLeft: 8,
+            height: 18,
+            paddingHorizontal: 6,
+            borderRadius: 5,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: chip,
+          }}
+        >
+          <Text variant="caption" style={{ color: tertiary }}>
+            {count}
+          </Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function SessionRow({
+  session,
+  searching,
+  ink,
+  subtle,
+  tertiary,
+  chip,
+  accent,
+  onPress,
+}: {
+  session: SessionSummary;
+  searching: boolean;
+  ink: string;
+  subtle: string;
+  tertiary: string;
+  chip: string;
+  accent: string;
+  onPress: () => void;
+}) {
+  const identity = resolveIdentity(session);
+  const count = session.messageCount;
+  const hasCount = typeof count === "number" && count > 0;
+  const relativeTime = formatSessionTime(session.lastModified);
+  const showBranch =
+    !identity.isWend && classifyBranch(session.gitBranch) === "FEATURE";
+
+  const a11yLabel = identity.isWend
+    ? `Open Wend run ${identity.a11yTitle}, ${session.project}, ${relativeTime}`
+    : `Open session ${identity.a11yTitle}, ${session.project}, ${relativeTime}`;
+
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={a11yLabel}
+      style={({ pressed }) => ({
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: 10,
+        marginHorizontal: 10,
+        paddingHorizontal: 12,
+        paddingVertical: 11,
+        borderRadius: 12,
+        backgroundColor: pressed ? chip : "transparent",
+      })}
+    >
+      <View style={{ width: 16, alignItems: "center" }}>
+        {identity.isWend ? (
+          <View
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: 3,
+              marginTop: 9,
+              backgroundColor: accent,
+            }}
+          />
+        ) : (
+          <Text
+            variant="caption"
+            style={{
+              fontFamily: MONO,
+              fontSize: 12,
+              lineHeight: 16,
+              marginTop: 4,
+              color: tertiary,
+            }}
+          >
+            {">_"}
+          </Text>
+        )}
+      </View>
+
+      <View style={{ flex: 1, flexDirection: "row", alignItems: "flex-start" }}>
+        <View style={{ flex: 1 }}>
+          {identity.isWend ? (
+            <Text
+              variant="body-em"
+              numberOfLines={1}
+              ellipsizeMode="tail"
+              style={{ color: subtle }}
+            >
+              <Text variant="body-em" style={{ color: subtle }}>
+                Wend run
+              </Text>
+              {identity.wendTitle ? (
+                <Text variant="body-em" style={{ color: tertiary }}>
+                  {" · "}
+                </Text>
+              ) : null}
+              {identity.wendTitle ? (
+                <Text variant="body-em" style={{ color: ink }}>
+                  {identity.wendTitle}
+                </Text>
+              ) : null}
+            </Text>
+          ) : (
+            <Text
+              variant="body-em"
+              numberOfLines={1}
+              ellipsizeMode="tail"
+              style={{ color: identity.untitled ? subtle : ink }}
+            >
+              {identity.untitled ? "Untitled session" : session.title}
+            </Text>
+          )}
+
+          <Text
+            variant="caption"
+            numberOfLines={1}
+            style={{ color: tertiary, marginTop: 3 }}
+          >
+            {searching ? (
+              <Text
+                variant="caption"
+                style={{ fontFamily: MONO, color: tertiary }}
+              >
+                {session.project}
+              </Text>
+            ) : null}
+            {searching ? " · " : null}
+            {relativeTime}
+            {hasCount ? ` · ${count} ${count === 1 ? "msg" : "msgs"}` : null}
+          </Text>
+        </View>
+
+        {showBranch ? (
+          <View
+            style={{
+              alignSelf: "center",
+              maxWidth: 120,
+              marginLeft: 8,
+              paddingHorizontal: 6,
+              paddingVertical: 1,
+              borderRadius: 5,
+              backgroundColor: chip,
+            }}
+          >
+            <Text
+              variant="caption"
+              numberOfLines={1}
+              ellipsizeMode="tail"
+              style={{ fontFamily: MONO, color: tertiary }}
+            >
+              {`⎇ ${session.gitBranch}`}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+    </Pressable>
   );
 }
 
@@ -219,6 +502,7 @@ function SearchBar({
   tertiary,
   border,
   chip,
+  accent,
   caret,
   placeholder,
 }: {
@@ -230,12 +514,14 @@ function SearchBar({
   tertiary: string;
   border: string;
   chip: string;
+  accent: string;
   caret: string;
   placeholder: string;
 }) {
+  const [focused, setFocused] = useState(false);
   const has = value.length > 0;
   return (
-    <View style={{ paddingHorizontal: 12, paddingTop: 10, paddingBottom: 4 }}>
+    <View style={{ paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6 }}>
       <View
         style={{
           flexDirection: "row",
@@ -245,7 +531,7 @@ function SearchBar({
           paddingHorizontal: 12,
           borderRadius: 10,
           borderWidth: 1,
-          borderColor: border,
+          borderColor: focused ? accent : border,
           backgroundColor: chip,
         }}
       >
@@ -253,6 +539,8 @@ function SearchBar({
         <TextInput
           value={value}
           onChangeText={onChangeText}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           placeholder="Search project or title"
           placeholderTextColor={placeholder}
           selectionColor={caret}
@@ -280,100 +568,6 @@ function SearchBar({
         ) : null}
       </View>
     </View>
-  );
-}
-
-function SessionRow({
-  session,
-  active,
-  ink,
-  subtle,
-  tertiary,
-  border,
-  chip,
-  accent,
-  onPress,
-}: {
-  session: SessionSummary;
-  active: boolean;
-  ink: string;
-  subtle: string;
-  tertiary: string;
-  border: string;
-  chip: string;
-  accent: string;
-  onPress: () => void;
-}) {
-  const count = session.messageCount;
-  const hasCount = typeof count === "number" && count > 0;
-  const meta = hasCount
-    ? `${formatSessionTime(session.lastModified)} · ${count} ${count === 1 ? "message" : "messages"}`
-    : formatSessionTime(session.lastModified);
-
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`Open session ${session.title}`}
-      style={({ pressed }) => ({
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 12,
-        marginHorizontal: 10,
-        paddingHorizontal: 12,
-        paddingVertical: 13,
-        borderRadius: 12,
-        backgroundColor: pressed ? chip : "transparent",
-      })}
-    >
-      <View
-        style={{
-          width: 7,
-          height: 7,
-          borderRadius: 4,
-          backgroundColor: active ? accent : border,
-        }}
-      />
-      <View style={{ flex: 1 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 7 }}>
-          <Text
-            variant="mono-inline"
-            numberOfLines={1}
-            style={{ color: subtle, flexShrink: 1 }}
-          >
-            {session.project}
-          </Text>
-          {session.gitBranch ? (
-            <View
-              style={{
-                paddingHorizontal: 6,
-                paddingVertical: 1,
-                borderRadius: 5,
-                backgroundColor: chip,
-              }}
-            >
-              <Text
-                variant="caption"
-                numberOfLines={1}
-                style={{ color: tertiary, fontFamily: "JetBrainsMono" }}
-              >
-                {session.gitBranch}
-              </Text>
-            </View>
-          ) : null}
-        </View>
-        <Text
-          variant="body-em"
-          numberOfLines={1}
-          style={{ color: ink, marginTop: 3 }}
-        >
-          {session.title || "Untitled session"}
-        </Text>
-        <Text variant="caption" style={{ color: tertiary, marginTop: 3 }}>
-          {meta}
-        </Text>
-      </View>
-    </Pressable>
   );
 }
 
@@ -445,10 +639,7 @@ function SegmentButton({
         backgroundColor: selected ? selectedBg : "transparent",
       }}
     >
-      <Text
-        variant="meta"
-        style={{ color: selected ? ink : subtle }}
-      >
+      <Text variant="meta" style={{ color: selected ? ink : subtle }}>
         {label}
       </Text>
     </Pressable>
