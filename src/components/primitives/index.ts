@@ -14,3 +14,5 @@ export { StatusDot } from "./StatusDot";
 export type { StatusKind } from "./StatusDot";
 export { Pill } from "./Pill";
 export type { PillProps } from "./Pill";
+export { Spinner } from "./Spinner";
+export type { SpinnerProps } from "./Spinner";

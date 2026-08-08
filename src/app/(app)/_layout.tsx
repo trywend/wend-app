@@ -18,6 +18,8 @@ import { Stack, useRouter, useSegments } from "expo-router";
 import { useAuthStore } from "@/store/authSlice";
 import { useDaemonStore } from "@/store/daemonSlice";
 import { useOnboardingStore } from "@/store/onboardingSlice";
+import { useResolvedDaemonURL } from "@/lib/dispatch/useResolvedDaemonURL";
+import { prefetchSessions } from "@/lib/sessions/useSessions";
 
 export default function AppLayout() {
   const router = useRouter();
@@ -28,6 +30,16 @@ export default function AppLayout() {
   const url = useDaemonStore((s) => s.url);
   const token = useDaemonStore((s) => s.token);
   const pairSkipped = useOnboardingStore((s) => s.pairSkipped);
+  const daemon = useResolvedDaemonURL();
+
+  useEffect(() => {
+    if (authStatus !== "authed" || !daemon.isReady) return;
+    void prefetchSessions({
+      url: daemon.url,
+      token: daemon.token,
+      isReady: daemon.isReady,
+    });
+  }, [authStatus, daemon.isReady, daemon.url, daemon.token]);
 
   // A pairing is usable with a token plus *either* a rendezvous deviceId
   // (v2) OR a direct URL (v1). Requiring deviceId locked out every v1
