@@ -13,8 +13,8 @@
  * project + title as you type; searching suspends grouping and flattens to a
  * flat recency list with the project restored on each row's meta line.
  *
- * NativeWind gotcha: every Pressable here with a function `style` keeps
- * layout inline; className carries non-layout only.
+ * NativeWind gotcha: a function-form Pressable `style` loses every property
+ * on Android, so taps go through PressableSurface (styles on an inner View).
  */
 import { useDeferredValue, useMemo, useState } from "react";
 import {
@@ -36,7 +36,7 @@ import {
   XCircleIcon,
 } from "phosphor-react-native";
 
-import { Text, Spinner } from "@/components/primitives";
+import { Text, Spinner, PressableSurface } from "@/components/primitives";
 import { HealthDot } from "@/components/HealthDot";
 import { useTheme } from "@/theme/ThemeProvider";
 import { typography } from "@/theme/tokens";
@@ -116,19 +116,15 @@ export default function SessionsScreen() {
         }}
       >
         <View style={{ width: 40, height: 36, borderRadius: 8, overflow: "hidden" }}>
-          <Pressable
+          <PressableSurface
             onPress={goNotes}
             accessibilityRole="button"
             accessibilityLabel="Back to notes"
-            style={({ pressed }) => ({
-              flex: 1,
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: pressed ? 0.6 : 1,
-            })}
+            style={{ width: 40, height: 36, alignItems: "center", justifyContent: "center" }}
+            pressedStyle={{ opacity: 0.6 }}
           >
             <CaretLeftIcon size={22} color={subtle} weight="regular" />
-          </Pressable>
+          </PressableSurface>
         </View>
         <Segmented active="sessions" onNotes={goNotes} />
         <View style={{ width: 40, alignItems: "flex-end", paddingRight: 6 }}>
@@ -192,17 +188,16 @@ export default function SessionsScreen() {
           >
             {error ?? "Could not reach your Mac."}
           </Text>
-          <Pressable
+          <PressableSurface
             onPress={refresh}
-            style={({ pressed }) => ({
-              marginTop: 14,
-              opacity: pressed ? 0.6 : 1,
-            })}
+            accessibilityRole="button"
+            style={{ marginTop: 14, paddingVertical: 6, paddingHorizontal: 10 }}
+            pressedStyle={{ opacity: 0.6 }}
           >
             <Text variant="meta" style={{ color: accent }}>
               Try again
             </Text>
-          </Pressable>
+          </PressableSurface>
         </CenteredState>
       ) : sessions.length === 0 ? (
         <CenteredState>
@@ -379,17 +374,18 @@ function SessionRow({
   const titleColor = !identity.isWend && !identity.untitled ? ink : subtle;
 
   return (
-    <Pressable
+    <PressableSurface
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={a11yLabel}
-      style={({ pressed }) => ({
+      style={{
         flexDirection: "row",
         alignItems: "center",
+        minHeight: 60,
         paddingHorizontal: 20,
-        paddingVertical: 13,
-        backgroundColor: pressed ? chip : "transparent",
-      })}
+        paddingVertical: 12,
+      }}
+      pressedStyle={{ backgroundColor: chip }}
     >
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: "row", alignItems: "center" }}>
@@ -468,7 +464,7 @@ function SessionRow({
           </Text>
         </View>
       ) : null}
-    </Pressable>
+    </PressableSurface>
   );
 }
 
@@ -536,15 +532,15 @@ function SearchBar({
           }}
         />
         {has ? (
-          <Pressable
+          <PressableSurface
             onPress={onClear}
             accessibilityRole="button"
             accessibilityLabel="Clear search"
             hitSlop={8}
-            style={({ pressed }) => ({ opacity: pressed ? 0.5 : 1 })}
+            pressedStyle={{ opacity: 0.5 }}
           >
             <XCircleIcon size={18} color={subtle} weight="fill" />
-          </Pressable>
+          </PressableSurface>
         ) : null}
       </View>
     </View>
