@@ -252,6 +252,13 @@ function installForegroundHandler(N: ExpoNotificationsModule) {
 }
 
 let pendingDeepLink: string | null = null;
+
+/** Open a note on the home editor from anywhere in the app. */
+export function requestOpenNote(noteId: string): void {
+  if (onResponseDeepLink) onResponseDeepLink(noteId);
+  else pendingDeepLink = noteId;
+}
+
 export function consumePendingDeepLink(): string | null {
   const v = pendingDeepLink;
   pendingDeepLink = null;

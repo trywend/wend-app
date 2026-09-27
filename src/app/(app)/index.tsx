@@ -61,6 +61,7 @@ import {
   MagnifyingGlassIcon,
   PaperclipIcon,
   QuotesIcon,
+  PackageIcon,
   StackIcon,
   StopIcon,
   TextBIcon,
@@ -1156,6 +1157,11 @@ export default function HomeScreen() {
                 icon={<StackIcon size={22} color={subtleColor} weight="regular" />}
                 accessibilityLabel="Sessions"
                 onPress={() => router.push("/(app)/sessions")}
+              />
+              <IconButton
+                icon={<PackageIcon size={22} color={subtleColor} weight="regular" />}
+                accessibilityLabel="Artifacts"
+                onPress={() => router.push("/(app)/artifacts")}
               />
             </View>
             <View
