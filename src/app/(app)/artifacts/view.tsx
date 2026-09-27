@@ -4,16 +4,16 @@
  * expanded mode, adds an inline text preview for text files, the note and
  * prompt it came from, and open-note / delete actions.
  *
- * NativeWind gotcha: every Pressable here with a function `style` keeps
- * layout inline; className carries non-layout only.
+ * NativeWind 4 drops every property a function-form Pressable `style` returns,
+ * so every tappable here goes through PressableSurface.
  */
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, ScrollView, View } from "react-native";
+import { Alert, ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { CaretLeftIcon, NoteIcon, TrashIcon } from "phosphor-react-native";
+import { CaretLeftIcon, CaretRightIcon, TrashIcon } from "phosphor-react-native";
 
-import { Text, Spinner } from "@/components/primitives";
+import { IconButton, PressableSurface, Spinner, Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
 import { useArtifactsCache } from "@/store/artifactsCacheSlice";
 import { useArtifactsLibrary } from "@/lib/artifacts/useArtifactsLibrary";
@@ -37,6 +37,8 @@ import {
 } from "@/components/editor/deliverables/useArtifact";
 
 const PREVIEW_CAP = 60_000;
+const PROMPT_LINES = 6;
+const DIMMED = { opacity: 0.6 } as const;
 
 export default function ArtifactScreen() {
   const { tokens } = useTheme();
@@ -64,7 +66,7 @@ export default function ArtifactScreen() {
   const tertiary = tokens["text-tertiary"];
   const border = tokens["border-hairline"];
   const chip = tokens["surface-chip"];
-  const accent = tokens["accent-default"];
+  const failed = tokens["status-failed"];
 
   function goBack() {
     if (router.canGoBack()) router.back();
@@ -99,6 +101,8 @@ export default function ArtifactScreen() {
     );
   }
 
+  const removed = artifact ? !artifact.available : false;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: canvas }} edges={["top", "bottom"]}>
       <View
@@ -112,71 +116,75 @@ export default function ArtifactScreen() {
           borderBottomColor: border,
         }}
       >
-        <View style={{ width: 40, height: 36, borderRadius: 8, overflow: "hidden" }}>
-          <Pressable
-            onPress={goBack}
-            accessibilityRole="button"
-            accessibilityLabel="Back to artifacts"
-            style={({ pressed }) => ({
-              flex: 1,
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: pressed ? 0.6 : 1,
-            })}
-          >
-            <CaretLeftIcon size={22} color={subtle} weight="regular" />
-          </Pressable>
-        </View>
+        <IconButton onPress={goBack} accessibilityLabel="Back to artifacts">
+          <CaretLeftIcon size={22} color={subtle} weight="regular" />
+        </IconButton>
         <Text variant="meta" style={{ color: subtle }}>
           {artifact ? kindLabel(artifact.kind) : "Artifact"}
         </Text>
-        <View style={{ width: 40, height: 36, borderRadius: 8, overflow: "hidden" }}>
-          {artifact ? (
-            <Pressable
-              onPress={confirmDelete}
-              accessibilityRole="button"
-              accessibilityLabel="Delete artifact"
-              style={({ pressed }) => ({
-                flex: 1,
-                alignItems: "center",
-                justifyContent: "center",
-                opacity: pressed ? 0.6 : 1,
-              })}
-            >
-              <TrashIcon size={20} color={subtle} weight="regular" />
-            </Pressable>
-          ) : null}
-        </View>
+        <View style={{ width: 40, height: 40 }} />
       </View>
 
       {!artifact ? (
-        <View style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 32 }}>
-          <Text variant="body-em" style={{ color: subtle, textAlign: "center" }}>
+        <View
+          style={{
+            flex: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            paddingHorizontal: 32,
+            paddingBottom: 48,
+          }}
+        >
+          <Text variant="body-em" style={{ color: subtle, textAlign: "center", maxWidth: 280 }}>
             This artifact is no longer in the library.
           </Text>
+          <PressableSurface
+            onPress={goBack}
+            accessibilityRole="button"
+            accessibilityLabel="Back to artifacts"
+            hitSlop={14}
+            style={{ marginTop: 16 }}
+            pressedStyle={DIMMED}
+          >
+            <Text variant="meta" style={{ color: tokens["accent-default"] }}>
+              Back to artifacts
+            </Text>
+          </PressableSurface>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 48, gap: 18 }}>
-          <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
+        <ScrollView
+          contentContainerStyle={{
+            paddingHorizontal: 20,
+            paddingTop: 20,
+            paddingBottom: 48,
+            gap: 24,
+          }}
+        >
+          <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 14 }}>
             <View
               style={{
-                width: 40,
-                height: 40,
-                borderRadius: 11,
+                width: 44,
+                height: 44,
+                borderRadius: 12,
                 alignItems: "center",
                 justifyContent: "center",
-                backgroundColor: chip,
+                backgroundColor: removed ? "transparent" : chip,
                 borderWidth: 1,
                 borderColor: border,
+                flexShrink: 0,
               }}
             >
-              <ArtifactKindIcon kind={artifact.kind} size={19} color={accent} />
+              <ArtifactKindIcon
+                kind={artifact.kind}
+                size={20}
+                color={removed ? tertiary : subtle}
+              />
             </View>
-            <View style={{ flex: 1 }}>
-              <Text variant="title" selectable style={{ color: ink }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text variant="title" selectable numberOfLines={3} style={{ color: ink }}>
                 {displayName(artifact)}
               </Text>
-              <Text variant="caption" style={{ color: tertiary, marginTop: 4 }}>
+              <Text variant="meta" style={{ color: tertiary, marginTop: 4 }}>
                 {[
                   formatBytes(artifact.size),
                   new Date(artifact.createdAt).toLocaleString(undefined, {
@@ -195,89 +203,188 @@ export default function ArtifactScreen() {
               borderRadius: 12,
               borderWidth: 1,
               borderColor: border,
-              paddingHorizontal: 14,
-              paddingVertical: 12,
-              gap: 8,
+              backgroundColor: tokens["surface-elevated"],
+              overflow: "hidden",
             }}
           >
-            <MetaRow label="Note" value={artifact.noteTitle} subtle={tertiary} ink={ink} />
-            {artifact.project ? (
-              <MetaRow label="Project" value={artifact.project} subtle={tertiary} ink={ink} mono />
-            ) : null}
-            <MetaRow label="Type" value={artifact.mime} subtle={tertiary} ink={ink} mono />
             {hasLocalNote ? (
-              <Pressable
+              <PressableSurface
                 onPress={openNote}
                 accessibilityRole="button"
                 accessibilityLabel="Open the note"
-                style={({ pressed }) => ({
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 6,
-                  marginTop: 4,
-                  opacity: pressed ? 0.6 : 1,
-                })}
+                pressedStyle={{ backgroundColor: chip }}
               >
-                <NoteIcon size={15} color={accent} weight="regular" />
-                <Text variant="meta" style={{ color: accent }}>
-                  Open note
-                </Text>
-              </Pressable>
+                <MetaRow label="Note" value={artifact.noteTitle} trailing />
+              </PressableSurface>
+            ) : (
+              <MetaRow label="Note" value={artifact.noteTitle} />
+            )}
+            {artifact.project ? (
+              <>
+                <Hairline />
+                <MetaRow label="Project" value={artifact.project} mono />
+              </>
             ) : null}
+            <Hairline />
+            <MetaRow label="Type" value={artifact.mime} mono />
           </View>
 
-          {artifact.prompt ? (
-            <View style={{ flexDirection: "row", gap: 10 }}>
-              <View style={{ width: 2, borderRadius: 1, backgroundColor: accent }} />
-              <Text
-                variant="body"
-                numberOfLines={6}
-                style={{ color: subtle, flex: 1, fontSize: 15, lineHeight: 22 }}
-              >
-                {artifact.prompt}
-              </Text>
-            </View>
-          ) : null}
+          {artifact.prompt ? <PromptQuote prompt={artifact.prompt} /> : null}
 
           {artifact.available ? (
             <Preview artifact={artifact} />
           ) : (
-            <Text variant="caption" style={{ color: tertiary, lineHeight: 18 }}>
-              The file was removed from your Mac. The record stays so you know it existed.
-            </Text>
+            <View style={{ borderRadius: 12, borderWidth: 1, borderColor: border, padding: 14 }}>
+              <Text variant="meta" style={{ color: subtle }}>
+                Removed from your Mac
+              </Text>
+              <Text variant="caption" style={{ color: tertiary, marginTop: 4 }}>
+                The record stays so you know it existed.
+              </Text>
+            </View>
           )}
+
+          <View
+            style={{
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: border,
+              overflow: "hidden",
+              marginTop: 8,
+            }}
+          >
+            <PressableSurface
+              onPress={confirmDelete}
+              accessibilityRole="button"
+              accessibilityLabel="Delete from Mac"
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 10,
+                paddingHorizontal: 14,
+                height: 48,
+              }}
+              pressedStyle={{ backgroundColor: chip }}
+            >
+              <TrashIcon size={18} color={failed} weight="regular" />
+              <Text variant="body-em" style={{ color: failed, fontSize: 15 }}>
+                Delete from Mac
+              </Text>
+            </PressableSurface>
+          </View>
         </ScrollView>
       )}
     </SafeAreaView>
   );
 }
 
+function Hairline() {
+  const { tokens } = useTheme();
+  return <View style={{ height: 1, backgroundColor: tokens["border-hairline"] }} />;
+}
+
 function MetaRow({
   label,
   value,
-  subtle,
-  ink,
   mono,
+  trailing,
 }: {
   label: string;
   value: string;
-  subtle: string;
-  ink: string;
   mono?: boolean;
+  trailing?: boolean;
 }) {
+  const { tokens } = useTheme();
   return (
-    <View style={{ flexDirection: "row", gap: 12 }}>
-      <Text variant="caption" style={{ color: subtle, width: 56 }}>
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        minHeight: 44,
+      }}
+    >
+      <Text variant="caption" style={{ color: tokens["text-tertiary"], width: 64 }}>
         {label}
       </Text>
       <Text
         variant={mono ? "mono-inline" : "meta"}
         numberOfLines={2}
         selectable
-        style={{ color: ink, flex: 1, fontSize: 13 }}
+        style={[{ color: tokens["text-primary"], flex: 1 }, mono ? { fontSize: 13 } : null]}
       >
         {value}
       </Text>
+      {trailing ? (
+        <CaretRightIcon size={14} color={tokens["text-tertiary"]} weight="regular" />
+      ) : null}
+    </View>
+  );
+}
+
+function PromptQuote({ prompt }: { prompt: string }) {
+  const { tokens } = useTheme();
+  const [overflows, setOverflows] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const subtle = tokens["text-secondary"];
+  const textStyle = { color: subtle, fontSize: 15, lineHeight: 22 };
+
+  return (
+    <View>
+      <Text
+        variant="caption"
+        style={{
+          color: tokens["text-tertiary"],
+          textTransform: "uppercase",
+          letterSpacing: 0.6,
+          marginBottom: 8,
+        }}
+      >
+        Prompt
+      </Text>
+      <View style={{ flexDirection: "row", gap: 12 }}>
+        <View style={{ width: 2, borderRadius: 1, backgroundColor: tokens["border-default"] }} />
+        <View style={{ flex: 1 }}>
+          <Text
+            variant="body"
+            selectable
+            numberOfLines={expanded ? undefined : PROMPT_LINES}
+            style={textStyle}
+          >
+            {prompt}
+          </Text>
+          {/* Unclamped twin measures the real line count; a clamped Text's
+              onTextLayout reports different things on iOS and Android. */}
+          <Text
+            variant="body"
+            pointerEvents="none"
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            onTextLayout={(e) => setOverflows(e.nativeEvent.lines.length > PROMPT_LINES)}
+            style={[textStyle, { position: "absolute", left: 0, right: 0, top: 0, opacity: 0 }]}
+          >
+            {prompt}
+          </Text>
+        </View>
+      </View>
+      {overflows ? (
+        <View style={{ alignItems: "flex-start" }}>
+          <PressableSurface
+            onPress={() => setExpanded((v) => !v)}
+            accessibilityRole="button"
+            accessibilityLabel={expanded ? "Show less" : "Show all"}
+            hitSlop={12}
+            style={{ marginTop: 6 }}
+            pressedStyle={DIMMED}
+          >
+            <Text variant="meta" style={{ color: subtle }}>
+              {expanded ? "Show less" : "Show all"}
+            </Text>
+          </PressableSurface>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -285,17 +392,17 @@ function MetaRow({
 function Preview({ artifact }: { artifact: LibraryArtifact }) {
   switch (artifact.kind) {
     case "html":
-      return <HtmlDeliverable artifact={artifact} runId={artifact.runId} />;
+      return <HtmlDeliverable artifact={artifact} runId={artifact.runId} flush />;
     case "diff":
-      return <DiffDeliverable artifact={artifact} runId={artifact.runId} />;
+      return <DiffDeliverable artifact={artifact} runId={artifact.runId} flush />;
     case "image":
-      return <FileDeliverable artifact={artifact} runId={artifact.runId} />;
+      return <FileDeliverable artifact={artifact} runId={artifact.runId} flush />;
     case "answer":
       return <AnswerPreview artifact={artifact} />;
     default:
       return (
-        <View style={{ gap: 14 }}>
-          <FileDeliverable artifact={artifact} runId={artifact.runId} />
+        <View style={{ gap: 12 }}>
+          <FileDeliverable artifact={artifact} runId={artifact.runId} flush />
           {isTextLike(artifact) ? <TextPreview artifact={artifact} /> : null}
         </View>
       );
@@ -303,12 +410,11 @@ function Preview({ artifact }: { artifact: LibraryArtifact }) {
 }
 
 function AnswerPreview({ artifact }: { artifact: LibraryArtifact }) {
-  const { tokens } = useTheme();
   const state = useArtifactText(artifact.runId, artifact.id, true);
   if (state.phase === "ready") {
-    return <AnswerDeliverable artifact={artifact} text={state.text} />;
+    return <AnswerDeliverable artifact={artifact} text={state.text} flush />;
   }
-  return <LoadState phase={state.phase} color={tokens["text-secondary"]} />;
+  return <LoadState phase={state.phase} />;
 }
 
 function TextPreview({ artifact }: { artifact: LibraryArtifact }) {
@@ -319,9 +425,7 @@ function TextPreview({ artifact }: { artifact: LibraryArtifact }) {
     [state],
   );
   if (artifact.size > 2_000_000) return null;
-  if (state.phase !== "ready") {
-    return <LoadState phase={state.phase} color={tokens["text-secondary"]} />;
-  }
+  if (state.phase !== "ready") return <LoadState phase={state.phase} />;
   return (
     <View
       style={{
@@ -329,6 +433,7 @@ function TextPreview({ artifact }: { artifact: LibraryArtifact }) {
         borderWidth: 1,
         borderColor: tokens["border-hairline"],
         backgroundColor: tokens["surface-chip"],
+        overflow: "hidden",
       }}
     >
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -352,7 +457,9 @@ function TextPreview({ artifact }: { artifact: LibraryArtifact }) {
   );
 }
 
-function LoadState({ phase, color }: { phase: string; color: string }) {
+function LoadState({ phase }: { phase: string }) {
+  const { tokens } = useTheme();
+  const color = tokens["text-secondary"];
   if (phase === "loading") {
     return (
       <View style={{ paddingVertical: 24, alignItems: "center" }}>

@@ -3,10 +3,10 @@
  * a spinner while the save/share sheet is being prepared.
  */
 import { useState } from "react";
-import { ActivityIndicator, Pressable, View } from "react-native";
+import { ActivityIndicator, View } from "react-native";
 import { DownloadSimpleIcon } from "phosphor-react-native";
 
-import { Text } from "@/components/primitives";
+import { PressableSurface, Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
 
 export function DownloadButton({
@@ -35,12 +35,12 @@ export function DownloadButton({
   }
 
   return (
-    <Pressable
+    <PressableSurface
       onPress={handle}
       accessibilityRole="button"
       accessibilityLabel={label}
       disabled={busy}
-      style={({ pressed }) => ({
+      style={{
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "center",
@@ -50,8 +50,8 @@ export function DownloadButton({
         borderRadius: 17,
         borderWidth: 1,
         borderColor: border,
-        opacity: pressed ? 0.6 : 1,
-      })}
+      }}
+      pressedStyle={{ opacity: 0.6 }}
     >
       {busy ? (
         <ActivityIndicator size="small" color={accent} />
@@ -63,7 +63,7 @@ export function DownloadButton({
       >
         {label}
       </Text>
-    </Pressable>
+    </PressableSurface>
   );
 }
 
@@ -73,11 +73,13 @@ export function DeliverableCard({
   icon,
   title,
   chip,
+  flush = false,
   children,
 }: {
   icon: React.ReactNode;
   title: string;
   chip?: string;
+  flush?: boolean;
   children: React.ReactNode;
 }) {
   const { tokens } = useTheme();
@@ -90,9 +92,9 @@ export function DeliverableCard({
   return (
     <View
       style={{
-        marginHorizontal: 14,
-        marginTop: 12,
-        marginBottom: 4,
+        marginHorizontal: flush ? 0 : 14,
+        marginTop: flush ? 0 : 12,
+        marginBottom: flush ? 0 : 4,
         borderWidth: 1,
         borderColor: border,
         borderRadius: 12,

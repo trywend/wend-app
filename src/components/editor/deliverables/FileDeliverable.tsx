@@ -17,7 +17,7 @@ import {
   XIcon,
 } from "phosphor-react-native";
 
-import { Text } from "@/components/primitives";
+import { PressableSurface, Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
 import type { Artifact } from "@/lib/notes-storage";
 import { DeliverableCard, DownloadButton } from "./DownloadButton";
@@ -31,10 +31,12 @@ export function FileDeliverable({
   artifact,
   runId,
   compact,
+  flush,
 }: {
   artifact: Artifact;
   runId: string | undefined;
   compact?: boolean;
+  flush?: boolean;
 }) {
   const { tokens } = useTheme();
   const insets = useSafeAreaInsets();
@@ -69,7 +71,7 @@ export function FileDeliverable({
 
   if (compact) {
     return (
-      <DeliverableCard icon={icon} title={name} chip={chip}>
+      <DeliverableCard icon={icon} title={name} chip={chip} flush={flush}>
         {isImage && url && imgPhase !== "error" ? (
           <View
             style={{
@@ -141,7 +143,7 @@ export function FileDeliverable({
 
   return (
     <>
-      <DeliverableCard icon={icon} title={name} chip={chip}>
+      <DeliverableCard icon={icon} title={name} chip={chip} flush={flush}>
         {isImage && url && imgPhase !== "error" ? (
           <Pressable
             onPress={() => setFull(true)}
@@ -193,18 +195,18 @@ export function FileDeliverable({
             </Text>
           </View>
         ) : (
-          <Pressable
+          <PressableSurface
             onPress={() => void save()}
             accessibilityRole="button"
             accessibilityLabel={`Open ${name}`}
-            style={({ pressed }) => ({
+            style={{
               paddingHorizontal: 12,
               paddingVertical: 16,
               flexDirection: "row",
               alignItems: "center",
               gap: 10,
-              opacity: pressed ? 0.6 : 1,
-            })}
+            }}
+            pressedStyle={{ opacity: 0.6 }}
           >
             <FileIcon size={22} color={subtle} weight="regular" />
             <View style={{ flex: 1 }}>
@@ -228,7 +230,7 @@ export function FileDeliverable({
                 </Text>
               ) : null}
             </View>
-          </Pressable>
+          </PressableSurface>
         )}
         {isImage && imgPhase === "error" ? null : (
           <View
@@ -243,11 +245,11 @@ export function FileDeliverable({
             }}
           >
             {isImage && url && imgPhase === "ready" ? (
-              <Pressable
+              <PressableSurface
                 onPress={() => setFull(true)}
                 accessibilityRole="button"
                 accessibilityLabel="Open fullscreen"
-                style={({ pressed }) => ({
+                style={{
                   flexDirection: "row",
                   alignItems: "center",
                   gap: 7,
@@ -256,14 +258,14 @@ export function FileDeliverable({
                   borderRadius: 17,
                   borderWidth: 1,
                   borderColor: border,
-                  opacity: pressed ? 0.6 : 1,
-                })}
+                }}
+                pressedStyle={{ opacity: 0.6 }}
               >
                 <ArrowsOutSimpleIcon size={15} color={accent} weight="regular" />
                 <Text style={{ fontFamily: "Inter-SemiBold", fontSize: 13, color: accent }}>
                   Fullscreen
                 </Text>
-              </Pressable>
+              </PressableSurface>
             ) : null}
             <DownloadButton onDownload={save} />
           </View>

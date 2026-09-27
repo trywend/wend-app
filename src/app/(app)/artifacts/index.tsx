@@ -7,13 +7,12 @@
  * Renders from the persisted cache instantly and refreshes in the background
  * (useArtifactsLibrary).
  *
- * NativeWind gotcha: every Pressable here with a function `style` keeps
- * layout inline; className carries non-layout only.
+ * NativeWind 4 drops every property a function-form Pressable `style` returns,
+ * so every tappable here goes through PressableSurface.
  */
 import { useDeferredValue, useMemo, useState } from "react";
 import {
   Alert,
-  Pressable,
   RefreshControl,
   ScrollView,
   SectionList,
@@ -28,10 +27,11 @@ import {
   LaptopIcon,
   MagnifyingGlassIcon,
   PackageIcon,
+  WifiSlashIcon,
   XCircleIcon,
 } from "phosphor-react-native";
 
-import { Text, Spinner } from "@/components/primitives";
+import { IconButton, PressableSurface, Spinner, Text } from "@/components/primitives";
 import { HealthDot } from "@/components/HealthDot";
 import { useTheme } from "@/theme/ThemeProvider";
 import { typography } from "@/theme/tokens";
@@ -68,6 +68,8 @@ const NEXT_SORT: Record<SortOrder, SortOrder> = {
   oldest: "largest",
   largest: "newest",
 };
+
+const DIMMED = { opacity: 0.6 } as const;
 
 interface Section {
   title: string;
@@ -111,22 +113,29 @@ export default function ArtifactsScreen() {
     return c;
   }, [artifacts]);
 
+  const kindsPresent = FILTERS.filter((f) => f.key !== "all" && (counts[f.key] ?? 0) > 0);
+  const showChips = kindsPresent.length >= 2;
+  // Derived rather than reset in an effect: a hidden chip row or a kind that
+  // emptied after a delete both fall back to "all" on the same render.
+  const activeKind: KindFilter =
+    showChips && (kind === "all" || (counts[kind] ?? 0) > 0) ? kind : "all";
+
+  const trimmedQuery = deferredQuery.trim().toLowerCase();
   const filtered = useMemo(() => {
-    const q = deferredQuery.trim().toLowerCase();
     const list = artifacts.filter((a) => {
-      if (kind !== "all" && a.kind !== kind) return false;
-      if (!q) return true;
+      if (activeKind !== "all" && a.kind !== activeKind) return false;
+      if (!trimmedQuery) return true;
       return `${a.name} ${a.noteTitle} ${a.project} ${a.prompt}`
         .toLowerCase()
-        .includes(q);
+        .includes(trimmedQuery);
     });
     if (sort === "oldest") return [...list].reverse();
     if (sort === "largest") return [...list].sort((a, b) => b.size - a.size);
     return list;
-  }, [artifacts, deferredQuery, kind, sort]);
+  }, [artifacts, trimmedQuery, activeKind, sort]);
 
   const sections = useMemo<Section[]>(() => {
-    if (sort === "largest") return [{ title: "Largest first", data: filtered }];
+    if (sort === "largest") return [{ title: "", data: filtered }];
     const now = new Date();
     const order: string[] = [];
     const groups: Record<string, LibraryArtifact[]> = {};
@@ -151,6 +160,11 @@ export default function ArtifactsScreen() {
       pathname: "/(app)/artifacts/view",
       params: { runId: a.runId, id: a.id },
     });
+  }
+
+  function clearFilters() {
+    setQuery("");
+    setKind("all");
   }
 
   function confirmDelete(a: LibraryArtifact) {
@@ -182,10 +196,11 @@ export default function ArtifactsScreen() {
   );
 
   const hasItems = artifacts.length > 0;
-  const summary = hasItems
-    ? `${artifacts.length} artifact${artifacts.length === 1 ? "" : "s"}` +
-      (storedBytes > 0 ? ` · ${formatBytes(storedBytes)} on your Mac` : "")
-    : null;
+  const narrowed = activeKind !== "all" || trimmedQuery.length > 0;
+  const summary = narrowed
+    ? `${filtered.length} of ${artifacts.length}`
+    : `${artifacts.length} artifact${artifacts.length === 1 ? "" : "s"}` +
+      (storedBytes > 0 ? ` · ${formatBytes(storedBytes)} on your Mac` : "");
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: canvas }} edges={["top", "bottom"]}>
@@ -200,21 +215,9 @@ export default function ArtifactsScreen() {
           borderBottomColor: border,
         }}
       >
-        <View style={{ width: 40, height: 36, borderRadius: 8, overflow: "hidden" }}>
-          <Pressable
-            onPress={goBack}
-            accessibilityRole="button"
-            accessibilityLabel="Back"
-            style={({ pressed }) => ({
-              flex: 1,
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: pressed ? 0.6 : 1,
-            })}
-          >
-            <CaretLeftIcon size={22} color={subtle} weight="regular" />
-          </Pressable>
-        </View>
+        <IconButton onPress={goBack} accessibilityLabel="Back">
+          <CaretLeftIcon size={22} color={subtle} weight="regular" />
+        </IconButton>
         <Text variant="body-em" style={{ color: ink }}>
           Artifacts
         </Text>
@@ -224,95 +227,38 @@ export default function ArtifactsScreen() {
       </View>
 
       {hasItems ? (
-        <View style={{ paddingTop: 10 }}>
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              marginHorizontal: 16,
-              paddingHorizontal: 12,
-              height: 38,
-              borderRadius: 10,
-              backgroundColor: chip,
-              borderWidth: 1,
-              borderColor: border,
-              gap: 8,
-            }}
-          >
-            <MagnifyingGlassIcon size={16} color={tertiary} weight="regular" />
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Search files, notes, projects"
-              placeholderTextColor={tokens["text-placeholder"]}
-              selectionColor={tokens["accent-caret"]}
-              autoCorrect={false}
-              autoCapitalize="none"
-              returnKeyType="search"
-              style={{
-                flex: 1,
-                color: ink,
-                fontFamily: "Inter-Regular",
-                fontSize: typography.body.fontSize,
-                paddingVertical: 0,
-              }}
-            />
-            {query.length > 0 ? (
-              <Pressable
-                onPress={() => setQuery("")}
-                accessibilityRole="button"
-                accessibilityLabel="Clear search"
-                hitSlop={8}
-                style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
-              >
-                <XCircleIcon size={16} color={tertiary} weight="fill" />
-              </Pressable>
-            ) : null}
-          </View>
+        <View>
+          <SearchField value={query} onChangeText={setQuery} />
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 10, gap: 6 }}
-            keyboardShouldPersistTaps="handled"
-          >
-            {FILTERS.map((f) => {
-              const n = f.key === "all" ? artifacts.length : counts[f.key] ?? 0;
-              if (f.key !== "all" && n === 0) return null;
-              const selected = kind === f.key;
-              return (
-                <Pressable
-                  key={f.key}
-                  onPress={() => setKind(f.key)}
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected }}
-                  accessibilityLabel={`${f.label}, ${n}`}
-                  style={({ pressed }) => ({
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 5,
-                    height: 30,
-                    paddingHorizontal: 12,
-                    borderRadius: 15,
-                    borderWidth: 1,
-                    borderColor: selected ? accent : border,
-                    backgroundColor: selected ? chip : "transparent",
-                    opacity: pressed ? 0.6 : 1,
-                  })}
-                >
-                  <Text variant="meta" style={{ color: selected ? ink : subtle }}>
-                    {f.label}
-                  </Text>
-                  <Text
-                    variant="caption"
-                    style={{ color: tertiary, fontVariant: ["tabular-nums"] }}
-                  >
-                    {n}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
+          {showChips ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              style={{ flexGrow: 0 }}
+              contentContainerStyle={{
+                paddingHorizontal: 20,
+                paddingVertical: 10,
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              {FILTERS.map((f) => {
+                const n = f.key === "all" ? artifacts.length : counts[f.key] ?? 0;
+                if (f.key !== "all" && n === 0) return null;
+                return (
+                  <KindChip
+                    key={f.key}
+                    label={f.label}
+                    count={n}
+                    selected={activeKind === f.key}
+                    onPress={() => setKind(f.key)}
+                  />
+                );
+              })}
+            </ScrollView>
+          ) : null}
 
           <View
             style={{
@@ -320,108 +266,87 @@ export default function ArtifactsScreen() {
               alignItems: "center",
               justifyContent: "space-between",
               paddingHorizontal: 20,
-              paddingBottom: 4,
+              height: 32,
+              marginTop: showChips ? 0 : 6,
             }}
           >
-            <Text variant="caption" style={{ color: tertiary }}>
+            <Text
+              variant="caption"
+              numberOfLines={1}
+              style={{ color: tertiary, flexShrink: 1 }}
+            >
               {summary}
             </Text>
-            <Pressable
+            <PressableSurface
               onPress={() => setSort(NEXT_SORT[sort])}
               accessibilityRole="button"
               accessibilityLabel={`Sort: ${SORT_LABEL[sort]}`}
-              hitSlop={8}
-              style={({ pressed }) => ({
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 4,
-                opacity: pressed ? 0.6 : 1,
-              })}
+              hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+              style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingLeft: 12 }}
+              pressedStyle={DIMMED}
             >
-              <ArrowsDownUpIcon size={13} color={subtle} weight="regular" />
+              <ArrowsDownUpIcon size={14} color={subtle} weight="regular" />
               <Text variant="caption" style={{ color: subtle }}>
                 {SORT_LABEL[sort]}
               </Text>
-            </Pressable>
+            </PressableSurface>
           </View>
+
+          {status === "error" ? (
+            <Text
+              variant="caption"
+              style={{ color: tertiary, paddingHorizontal: 20, paddingBottom: 4 }}
+            >
+              Showing the saved list. Your Mac did not respond.
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
       {status === "loading" && !hasItems ? (
         <CenteredState>
           <Spinner size={22} color={subtle} />
-          <Text variant="meta" style={{ color: subtle, marginTop: 10 }}>
-            Loading artifacts…
+          <Text variant="meta" style={{ color: tertiary, textAlign: "center", marginTop: 12 }}>
+            Loading artifacts
           </Text>
         </CenteredState>
       ) : status === "not-ready" && !hasItems ? (
         <CenteredState>
-          <EmptyGlyph chip={chip} border={border}>
+          <EmptyGlyph>
             <LaptopIcon size={30} color={tertiary} weight="light" />
           </EmptyGlyph>
-          <Text variant="body-em" style={{ color: subtle, textAlign: "center", maxWidth: 280 }}>
-            Pair your Mac to see its artifacts
-          </Text>
-          <Text
-            variant="caption"
-            style={{ color: tertiary, textAlign: "center", maxWidth: 270, marginTop: 8, lineHeight: 18 }}
-          >
-            Every file, page, diff, and answer your notes produce lands here.
-          </Text>
+          <Headline>Pair your Mac to see its artifacts</Headline>
+          <Body>Every file, page, diff, and answer your notes produce lands here.</Body>
         </CenteredState>
       ) : status === "error" && !hasItems ? (
         <CenteredState>
-          <Text variant="meta" style={{ color: subtle, textAlign: "center", maxWidth: 280 }}>
-            {error ?? "Could not reach your Mac."}
-          </Text>
-          <Pressable
-            onPress={refresh}
-            style={({ pressed }) => ({ marginTop: 14, opacity: pressed ? 0.6 : 1 })}
-          >
-            <Text variant="meta" style={{ color: accent }}>
-              Try again
-            </Text>
-          </Pressable>
+          <EmptyGlyph>
+            <WifiSlashIcon size={28} color={tertiary} weight="light" />
+          </EmptyGlyph>
+          <Headline>Could not reach your Mac</Headline>
+          {error ? <Body>{error}</Body> : null}
+          <StateLink label="Try again" onPress={refresh} />
         </CenteredState>
       ) : !hasItems ? (
-        <ScrollView
-          contentContainerStyle={{ flexGrow: 1 }}
-          refreshControl={refreshControl}
-        >
+        <ScrollView contentContainerStyle={{ flexGrow: 1 }} refreshControl={refreshControl}>
           <CenteredState>
-            <EmptyGlyph chip={chip} border={border}>
+            <EmptyGlyph>
               <PackageIcon size={28} color={tertiary} weight="light" />
             </EmptyGlyph>
-            <Text variant="body-em" style={{ color: subtle, textAlign: "center", maxWidth: 280 }}>
-              No artifacts yet
-            </Text>
-            <Text
-              variant="caption"
-              style={{ color: tertiary, textAlign: "center", maxWidth: 280, marginTop: 8, lineHeight: 18 }}
-            >
-              Wend a note that writes a file, a page, or a diff. It lands here, kept on your Mac until you delete it.
-            </Text>
+            <Headline>No artifacts yet</Headline>
+            <Body>
+              Wend a note that writes a file, a page, or a diff. It lands here and stays on your
+              Mac until you delete it.
+            </Body>
           </CenteredState>
         </ScrollView>
       ) : filtered.length === 0 ? (
         <CenteredState>
-          <EmptyGlyph chip={chip} border={border}>
+          <EmptyGlyph>
             <MagnifyingGlassIcon size={26} color={tertiary} weight="light" />
           </EmptyGlyph>
-          <Text variant="body-em" style={{ color: subtle, textAlign: "center", maxWidth: 280 }}>
-            No artifacts match
-          </Text>
-          <Pressable
-            onPress={() => {
-              setQuery("");
-              setKind("all");
-            }}
-            style={({ pressed }) => ({ marginTop: 10, opacity: pressed ? 0.6 : 1 })}
-          >
-            <Text variant="meta" style={{ color: accent }}>
-              Clear filters
-            </Text>
-          </Pressable>
+          <Headline>Nothing matches</Headline>
+          <StateLink label="Clear filters" onPress={clearFilters} />
         </CenteredState>
       ) : (
         <SectionList
@@ -432,34 +357,37 @@ export default function ArtifactsScreen() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           refreshControl={refreshControl}
-          renderSectionHeader={({ section }) => (
-            <View
-              accessibilityRole="header"
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-between",
-                paddingHorizontal: 20,
-                paddingTop: 18,
-                paddingBottom: 6,
-              }}
-            >
-              <Text variant="caption" style={{ color: subtle, letterSpacing: 0.4 }}>
-                {section.title.toUpperCase()}
-              </Text>
-              <Text variant="caption" style={{ color: tertiary, fontVariant: ["tabular-nums"] }}>
-                {section.data.length}
-              </Text>
-            </View>
-          )}
+          renderSectionHeader={({ section }) =>
+            sort === "largest" ? null : (
+              <View
+                accessibilityRole="header"
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  paddingHorizontal: 20,
+                  paddingTop: section === sections[0] ? 8 : 24,
+                  paddingBottom: 6,
+                }}
+              >
+                <Text
+                  variant="caption"
+                  style={{ color: subtle, textTransform: "uppercase", letterSpacing: 0.6 }}
+                >
+                  {section.title}
+                </Text>
+                <Text
+                  variant="caption"
+                  style={{ color: tertiary, fontVariant: ["tabular-nums"] }}
+                >
+                  {section.data.length}
+                </Text>
+              </View>
+            )
+          }
           renderItem={({ item }) => (
             <ArtifactRow
               artifact={item}
-              ink={ink}
-              subtle={subtle}
-              tertiary={tertiary}
-              chip={chip}
-              border={border}
-              accent={accent}
               onPress={() => open(item)}
               onLongPress={() => confirmDelete(item)}
             />
@@ -470,89 +398,213 @@ export default function ArtifactsScreen() {
   );
 }
 
+function SearchField({
+  value,
+  onChangeText,
+}: {
+  value: string;
+  onChangeText: (t: string) => void;
+}) {
+  const { tokens } = useTheme();
+  const [focused, setFocused] = useState(false);
+  const accent = tokens["accent-default"];
+  return (
+    <View style={{ paddingHorizontal: 20, paddingTop: 14, paddingBottom: 4 }}>
+      <View
+        style={{
+          height: 40,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 10,
+          borderBottomWidth: 1,
+          borderBottomColor: focused ? accent : tokens["border-hairline"],
+        }}
+      >
+        <MagnifyingGlassIcon
+          size={18}
+          color={focused ? accent : tokens["text-tertiary"]}
+          weight="regular"
+        />
+        <TextInput
+          value={value}
+          onChangeText={onChangeText}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          placeholder="Search name, note, project"
+          placeholderTextColor={tokens["text-placeholder"]}
+          selectionColor={tokens["accent-caret"]}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          style={{
+            flex: 1,
+            paddingVertical: 0,
+            fontFamily: "Inter-Regular",
+            fontSize: typography.body.fontSize,
+            color: tokens["text-primary"],
+          }}
+        />
+        {value.length > 0 ? (
+          <PressableSurface
+            onPress={() => onChangeText("")}
+            accessibilityRole="button"
+            accessibilityLabel="Clear search"
+            hitSlop={13}
+            pressedStyle={{ opacity: 0.5 }}
+          >
+            <XCircleIcon size={18} color={tokens["text-secondary"]} weight="fill" />
+          </PressableSurface>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+function KindChip({
+  label,
+  count,
+  selected,
+  onPress,
+}: {
+  label: string;
+  count: number;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const { tokens } = useTheme();
+  return (
+    <PressableSurface
+      onPress={onPress}
+      accessibilityRole="tab"
+      accessibilityState={{ selected }}
+      accessibilityLabel={`${label}, ${count}`}
+      hitSlop={{ top: 6, bottom: 6 }}
+      style={{
+        height: 32,
+        borderRadius: 16,
+        paddingHorizontal: 12,
+        borderWidth: 1,
+        borderColor: selected ? tokens["accent-default"] : tokens["border-hairline"],
+        backgroundColor: selected ? tokens["surface-chip"] : "transparent",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        flexShrink: 0,
+      }}
+      pressedStyle={{ backgroundColor: tokens["surface-chip"] }}
+    >
+      <Text
+        variant="meta"
+        style={{ color: selected ? tokens["text-primary"] : tokens["text-secondary"] }}
+      >
+        {label}
+      </Text>
+      <Text
+        variant="caption"
+        style={{
+          color: selected ? tokens["text-secondary"] : tokens["text-tertiary"],
+          fontVariant: ["tabular-nums"],
+        }}
+      >
+        {count}
+      </Text>
+    </PressableSurface>
+  );
+}
+
 function ArtifactRow({
   artifact,
-  ink,
-  subtle,
-  tertiary,
-  chip,
-  border,
-  accent,
   onPress,
   onLongPress,
 }: {
   artifact: LibraryArtifact;
-  ink: string;
-  subtle: string;
-  tertiary: string;
-  chip: string;
-  border: string;
-  accent: string;
   onPress: () => void;
   onLongPress: () => void;
 }) {
+  const { tokens } = useTheme();
+  const tertiary = tokens["text-tertiary"];
+  const border = tokens["border-hairline"];
+  const removed = !artifact.available;
+  const isAnswer = artifact.kind === "answer";
   const name = displayName(artifact);
   const meta = [
-    artifact.kind === "answer" ? null : artifact.noteTitle,
-    artifact.project || null,
-    formatBytes(artifact.size) || null,
+    isAnswer ? artifact.project : artifact.noteTitle,
+    formatBytes(artifact.size),
     formatSessionTime(artifact.createdAt),
   ]
     .filter(Boolean)
     .join(" · ");
 
   return (
-    <Pressable
+    <PressableSurface
       onPress={onPress}
       onLongPress={onLongPress}
       delayLongPress={350}
       accessibilityRole="button"
       accessibilityLabel={`Open ${name}, ${meta}`}
       accessibilityHint="Long press to delete"
-      style={({ pressed }) => ({
+      style={{
         flexDirection: "row",
         alignItems: "center",
         gap: 12,
         paddingHorizontal: 20,
-        paddingVertical: 11,
-        backgroundColor: pressed ? chip : "transparent",
-      })}
+        paddingVertical: 12,
+        minHeight: 64,
+      }}
+      pressedStyle={{ backgroundColor: tokens["surface-chip"] }}
     >
       <View
         style={{
-          width: 34,
-          height: 34,
-          borderRadius: 9,
+          width: 36,
+          height: 36,
+          borderRadius: 10,
           alignItems: "center",
           justifyContent: "center",
-          backgroundColor: chip,
+          backgroundColor: removed ? "transparent" : tokens["surface-chip"],
           borderWidth: 1,
           borderColor: border,
+          flexShrink: 0,
         }}
       >
-        <ArtifactKindIcon kind={artifact.kind} size={16} color={artifact.available ? accent : tertiary} />
+        <ArtifactKindIcon
+          kind={artifact.kind}
+          size={18}
+          color={removed ? tertiary : tokens["text-secondary"]}
+        />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <View style={{ flexDirection: "row", alignItems: "center" }}>
           <Text
             variant="body-em"
             numberOfLines={1}
-            ellipsizeMode="middle"
-            style={{ color: artifact.available ? ink : tertiary, flexShrink: 1 }}
+            ellipsizeMode={isAnswer ? "tail" : "middle"}
+            style={{ color: removed ? tertiary : tokens["text-primary"], flexShrink: 1 }}
           >
             {name}
           </Text>
-          {!artifact.available ? (
-            <Text variant="caption" style={{ color: tertiary }}>
-              Removed
-            </Text>
+          {removed ? (
+            <View
+              style={{
+                marginLeft: 8,
+                flexShrink: 0,
+                paddingHorizontal: 6,
+                paddingVertical: 1,
+                borderRadius: 6,
+                borderWidth: 1,
+                borderColor: border,
+              }}
+            >
+              <Text variant="caption" style={{ color: tertiary }}>
+                Removed
+              </Text>
+            </View>
           ) : null}
         </View>
-        <Text variant="caption" numberOfLines={1} style={{ color: subtle, marginTop: 2 }}>
+        <Text variant="meta" numberOfLines={1} style={{ color: tertiary, marginTop: 2 }}>
           {meta}
         </Text>
       </View>
-    </Pressable>
+    </PressableSurface>
   );
 }
 
@@ -572,30 +624,65 @@ function CenteredState({ children }: { children: React.ReactNode }) {
   );
 }
 
-function EmptyGlyph({
-  chip,
-  border,
-  children,
-}: {
-  chip: string;
-  border: string;
-  children: React.ReactNode;
-}) {
+function EmptyGlyph({ children }: { children: React.ReactNode }) {
+  const { tokens } = useTheme();
   return (
     <View
       style={{
         width: 64,
         height: 64,
-        borderRadius: 18,
+        borderRadius: 32,
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: chip,
+        backgroundColor: tokens["surface-chip"],
         borderWidth: 1,
-        borderColor: border,
-        marginBottom: 16,
+        borderColor: tokens["border-hairline"],
+        marginBottom: 18,
       }}
     >
       {children}
     </View>
+  );
+}
+
+function Headline({ children }: { children: React.ReactNode }) {
+  const { tokens } = useTheme();
+  return (
+    <Text
+      variant="body-em"
+      style={{ color: tokens["text-secondary"], textAlign: "center", maxWidth: 280 }}
+    >
+      {children}
+    </Text>
+  );
+}
+
+function Body({ children }: { children: React.ReactNode }) {
+  const { tokens } = useTheme();
+  return (
+    <Text
+      variant="meta"
+      style={{ color: tokens["text-tertiary"], textAlign: "center", maxWidth: 280, marginTop: 8 }}
+    >
+      {children}
+    </Text>
+  );
+}
+
+function StateLink({ label, onPress }: { label: string; onPress: () => void }) {
+  const { tokens } = useTheme();
+  return (
+    <PressableSurface
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      hitSlop={14}
+      style={{ marginTop: 16 }}
+      pressedStyle={DIMMED}
+    >
+      <Text variant="meta" style={{ color: tokens["accent-default"] }}>
+        {label}
+      </Text>
+    </PressableSurface>
   );
 }

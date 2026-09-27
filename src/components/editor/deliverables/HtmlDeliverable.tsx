@@ -17,7 +17,7 @@ import {
   XIcon,
 } from "phosphor-react-native";
 
-import { Text } from "@/components/primitives";
+import { PressableSurface, Text } from "@/components/primitives";
 import { useTheme } from "@/theme/ThemeProvider";
 import type { Artifact } from "@/lib/notes-storage";
 import { DeliverableCard, DownloadButton } from "./DownloadButton";
@@ -83,10 +83,12 @@ export function HtmlDeliverable({
   artifact,
   runId,
   compact,
+  flush,
 }: {
   artifact: Artifact;
   runId: string | undefined;
   compact?: boolean;
+  flush?: boolean;
 }) {
   const { tokens } = useTheme();
   const insets = useSafeAreaInsets();
@@ -114,7 +116,7 @@ export function HtmlDeliverable({
 
   if (compact) {
     return (
-      <DeliverableCard icon={icon} title={name} chip="HTML">
+      <DeliverableCard icon={icon} title={name} chip="HTML" flush={flush}>
         <View style={{ height: 120, backgroundColor: canvas }}>
           {state.phase === "loading" ? (
             <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
@@ -145,7 +147,7 @@ export function HtmlDeliverable({
 
   return (
     <>
-      <DeliverableCard icon={icon} title={name} chip="HTML">
+      <DeliverableCard icon={icon} title={name} chip="HTML" flush={flush}>
         <View style={{ height: INLINE_HEIGHT, backgroundColor: canvas }}>
           {state.phase === "loading" ? (
             <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
@@ -184,11 +186,11 @@ export function HtmlDeliverable({
           }}
         >
           {state.phase === "ready" && webViewAvailable ? (
-            <Pressable
+            <PressableSurface
               onPress={() => setFull(true)}
               accessibilityRole="button"
               accessibilityLabel="Open fullscreen"
-              style={({ pressed }) => ({
+              style={{
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 7,
@@ -197,14 +199,14 @@ export function HtmlDeliverable({
                 borderRadius: 17,
                 borderWidth: 1,
                 borderColor: border,
-                opacity: pressed ? 0.6 : 1,
-              })}
+              }}
+              pressedStyle={{ opacity: 0.6 }}
             >
               <ArrowsOutSimpleIcon size={15} color={accent} weight="regular" />
               <Text style={{ fontFamily: "Inter-SemiBold", fontSize: 13, color: accent }}>
                 Fullscreen
               </Text>
-            </Pressable>
+            </PressableSurface>
           ) : null}
           <DownloadButton label="Download .html" onDownload={save} />
         </View>

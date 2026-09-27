@@ -19,11 +19,13 @@ export function AnswerDeliverable({
   artifact,
   text,
   compact,
+  flush,
   onOpenFile,
 }: {
   artifact: Artifact;
   text: string;
   compact?: boolean;
+  flush?: boolean;
   onOpenFile?: (path: string) => void;
 }) {
   const { tokens } = useTheme();
@@ -44,6 +46,7 @@ export function AnswerDeliverable({
         icon={<ArticleIcon size={13} color={accent} weight="regular" />}
         title={name}
         chip="Answer"
+        flush={flush}
       >
         <View style={{ paddingHorizontal: 12, paddingVertical: 10 }}>
           <Text
@@ -68,6 +71,7 @@ export function AnswerDeliverable({
       icon={<ArticleIcon size={13} color={accent} weight="regular" />}
       title={name}
       chip="Answer"
+      flush={flush}
     >
       <View style={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 6 }}>
         <Markdown blocks={blocks} onOpenFile={onOpenFile} />

@@ -63,10 +63,12 @@ export function DiffDeliverable({
   artifact,
   runId,
   compact,
+  flush,
 }: {
   artifact: Artifact;
   runId: string | undefined;
   compact?: boolean;
+  flush?: boolean;
 }) {
   const { tokens } = useTheme();
   const accent = tokens["accent-default"];
@@ -107,6 +109,7 @@ export function DiffDeliverable({
         icon={<GitDiffIcon size={13} color={accent} weight="regular" />}
         title={name}
         chip="Diff"
+        flush={flush}
       >
         <View
           style={{
@@ -140,6 +143,7 @@ export function DiffDeliverable({
       icon={<GitDiffIcon size={13} color={accent} weight="regular" />}
       title={name}
       chip={statLine || "Diff"}
+      flush={flush}
     >
       {state.phase === "loading" ? (
         <View style={{ padding: 20, alignItems: "center" }}>

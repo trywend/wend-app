@@ -16,3 +16,7 @@ export { Pill } from "./Pill";
 export type { PillProps } from "./Pill";
 export { Spinner } from "./Spinner";
 export type { SpinnerProps } from "./Spinner";
+export { PressableSurface } from "./PressableSurface";
+export type { PressableSurfaceProps } from "./PressableSurface";
+export { IconButton } from "./IconButton";
+export type { IconButtonProps } from "./IconButton";
